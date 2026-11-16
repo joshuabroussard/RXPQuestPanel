@@ -1,0 +1,42 @@
+name: Release
+
+# Bump "## Version:" in RXPQuestPanel.toc, add a "Changes in <version>" section to
+# README.txt and push to main. This tests the addon, builds the zip and
+# release.json, and publishes a GitHub release that WowUp picks up as an update.
+# A version that already has a release is skipped, so other pushes are harmless.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua and luacheck
+        run: sudo apt-get update -q && sudo apt-get install -y -q lua5.1 lua-check zip
+
+      - name: Lint and test
+        run: |
+          luacheck --config tests/.luacheckrc --no-color Core.lua
+          lua5.1 tests/run.lua tests Core.lua
+
+      - name: Build
+        run: bash scripts/build.sh
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(cat dist/VERSION)
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is already released; nothing to do."
+            exit 0
+          fi
+          gh release create "v$VERSION" dist/*.zip dist/release.json \
+            --title "v$VERSION" --notes-file dist/NOTES.md --target "$GITHUB_SHA"
