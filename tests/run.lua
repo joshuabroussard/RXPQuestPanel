@@ -164,4 +164,36 @@ SlashCmdList.RXPQUESTPANEL("setup"); SlashCmdList.RXPQUESTPANEL("toggle")
 assert(not panel.setup and not overlay.__shown, "toggle off ends setup")
 SlashCmdList.RXPQUESTPANEL("toggle")
 SlashCmdList.RXPQUESTPANEL("debug")
+-- v0.2.1: link lines open RXP's copy-the-link box
+local step = RXPFrame.activeSteps[1]
+local linkFrame = CreateFrame("Frame", nil, RXPFrame)
+local ran = 0
+local linkEl = {text="CLICK HERE for a video tutorial", textOnly=true, url="https://example.com/v", tooltip="Click to view the link", frame=linkFrame, step=step}
+linkFrame.element = linkEl
+linkFrame:SetScript("OnMouseDown", function(self) assert(self == linkFrame); ran = ran + 1 end)
+table.insert(step.elements, linkEl)
+panel.dirty = true
+driver.__scripts.OnUpdate(driver, 2)
+local function rowFor(el) return find(panel, function(c) return c.element == el end)[1] end
+local lr = rowFor(linkEl)
+assert(lr and lr.__mouse and rawget(lr, "onClick"), "link line is clickable")
+lr.__scripts.OnClick(lr, "LeftButton")
+assert(ran == 1, "click runs RXP's own link handler")
+-- RXP's handler gone: falls back to RXP's popup with the url
+linkFrame:SetScript("OnMouseDown", nil)
+local shown, urlSeen
+StaticPopupDialogs = {RXP_Link = {}}
+StaticPopup_Show = function(name) shown = name; urlSeen = RXP.url end
+lr.__scripts.OnClick(lr, "LeftButton")
+assert(shown == "RXP_Link" and urlSeen == "https://example.com/v" and RXP.url == nil, "falls back to RXP_Link popup")
+-- no RXP popup either: our own box gets the url
+StaticPopupDialogs = {}
+local data
+StaticPopup_Show = function(name, _, _, d) shown = name; data = d end
+lr.__scripts.OnClick(lr, "LeftButton")
+assert(shown == "RXPQUESTPANEL_LINK" and data == "https://example.com/v", "own link box")
+-- plain text lines stay unclickable
+local plain = rowFor(step.elements[1])
+assert(plain and rawget(plain, "onClick") == nil and not plain.__mouse, "plain text line has no click")
+print("link lines OK")
 print("ALL OK")

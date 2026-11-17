@@ -1,4 +1,4 @@
-RXP Quest Panel 0.2.0
+RXP Quest Panel 0.2.1
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -86,3 +86,10 @@ Changes in 0.2.0
   - Commands are now /rxpq. The old /rxpu still works.
   - Settings start fresh under the new name, so run /rxpq setup once.
   - Now published on GitHub, so WowUp can install and update it (see README.md).
+
+Changes in 0.2.1
+  - Fixed: clicking a link line in the guide (like "CLICK HERE for a video
+    tutorial") did nothing. It now opens RestedXP's box with the link selected,
+    so you can press Ctrl+C and paste it into your browser.
+  - Link lines are shown in blue so you can tell they're clickable.
+  - "Click here for the next guide" lines work the same way as in RXP's window.

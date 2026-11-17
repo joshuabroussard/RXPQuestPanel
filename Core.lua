@@ -48,6 +48,7 @@ local C = {
     muted    = {0.58, 0.61, 0.66},
     done     = {0.38, 0.86, 0.47},
     fail     = {0.95, 0.35, 0.32},
+    link     = {0.45, 0.76, 1.00},       -- clickable link lines
     barBG    = {1, 1, 1, 0.08},
     boxEdge  = {0.42, 0.45, 0.50, 1},
     boxFill  = {0.09, 0.10, 0.12, 1},
@@ -787,6 +788,69 @@ local function ElementTooltip(row)
     end
 end
 
+-- Our own copy of RXP's "copy this link" box, used only if RXP's is missing.
+local function ShowLinkBox(url)
+    local dialogs = _G.StaticPopupDialogs
+    if not (dialogs and _G.StaticPopup_Show) then
+        Print("link: %s", url)
+        return
+    end
+    if not dialogs.RXPQUESTPANEL_LINK then
+        dialogs.RXPQUESTPANEL_LINK = {
+            text = "Press Ctrl+C to copy the link",
+            hasEditBox = 1,
+            button1 = _G.OKAY or "OK",
+            OnShow = function(self, data)
+                local box = self.editBox or self.EditBox or (self.GetName and _G[self:GetName() .. "EditBox"])
+                local text = data or self.data
+                if box and text then
+                    box:SetWidth(275)
+                    box:SetText(text)
+                    box:HighlightText()
+                    box:SetFocus()
+                end
+            end,
+            EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+            timeout = 0,
+            whileDead = 1,
+            hideOnEscape = 1,
+        }
+    end
+    _G.StaticPopup_Show("RXPQUESTPANEL_LINK", nil, nil, url)
+end
+
+-- Clicking a guide line that RXP makes clickable (a video/web link, or a
+-- "click here for the next guide" line). RXP puts the click handler on its
+-- own (hidden) line, so we run that same handler; links fall back to a
+-- copy box of our own.
+local function ElementClick(row, button)
+    local element = row.element
+    if not element or (button and button ~= "LeftButton") then return end
+    local ef = element.frame
+    local handler = ef and ef.element == element and ef.GetScript and ef:GetScript("OnMouseDown")
+    if handler then
+        local ok = pcall(handler, ef, "LeftButton")
+        panel.dirty = true
+        if ok then return end
+    end
+    if type(element.url) == "string" and element.url ~= "" then
+        local R = RXP()
+        if R and _G.StaticPopupDialogs and _G.StaticPopupDialogs.RXP_Link and _G.StaticPopup_Show then
+            R.url = element.url
+            pcall(_G.StaticPopup_Show, "RXP_Link")
+            R.url = nil
+        else
+            ShowLinkBox(element.url)
+        end
+    elseif element.next then
+        local R = RXP()
+        if R and R.functions and type(R.functions.next) == "function" then
+            pcall(R.functions.next, {step = element.step, element = element})
+            panel.dirty = true
+        end
+    end
+end
+
 local function ToggleElement(row)
     local element = row.element
     if not element then return end
@@ -862,8 +926,10 @@ local function RenderGuide()
                 if text then
                     local isDone = (element.completed or element.skip) and true or false
                     local r
+                    local clickable = element.textOnly and (element.url or element.next) and true or false
                     if element.textOnly then
-                        r = AddTextRow(text, {x = PAD + 2, size = 12, color = C.text, gap = 3})
+                        r = AddTextRow(text, {x = PAD + 2, size = 12,
+                                              color = clickable and C.link or C.text, gap = 3})
                     else
                         local cur2, tot2 = ParseProgress(text)
                         r = AddTextRow(text, {
@@ -879,6 +945,10 @@ local function RenderGuide()
                     if type(element.tooltip) == "string" then
                         r.wMouse = true
                         r.onEnter = ElementTooltip
+                    end
+                    if clickable then
+                        r.wMouse = true
+                        r.onClick = ElementClick
                     end
                 end
             end
