@@ -1481,7 +1481,7 @@ local function RenderGuide()
 
     -- Active steps (ongoing steps first, then yours). Waypoint Rail also
     -- shows the step before and after yours, on the same route line.
-    local shown, ghostedPrev, lastNonSticky = 0, false, nil
+    local shown, ghostedPrev = 0, false
     for _, step in ipairs(f.activeSteps or {}) do
         if StepVisible(step) then
             shown = shown + 1
@@ -1498,13 +1498,7 @@ local function RenderGuide()
             end
             StepHeader(title, step.sticky and "sticky" or "current")
             RenderElements(step, false)
-            if not step.sticky then lastNonSticky = step end
             y = y + 5
-        end
-    end
-    if IsRail() and lastNonSticky then
-        for i = (lastNonSticky.index or cur) + 1, total do
-            if StepHasText(guide.steps[i]) then GhostRow(guide.steps[i], 1, false); break end
         end
     end
     RailEnd()

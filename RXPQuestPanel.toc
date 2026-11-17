@@ -2,7 +2,7 @@
 ## Title: RXP Quest Panel
 ## Notes: Redraws the RestedXP Guides main window inside a combined guide + quest tracker on the right. The RXP arrow, tips, targets and everything else stay as they are.
 ## Author: Josh
-## Version: 0.5.0
+## Version: 0.5.1
 ## Dependencies: RXPGuides
 ## OptionalDeps: Questie, !KalielsTracker
 ## SavedVariables: RXPQuestPanelDB

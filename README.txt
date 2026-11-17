@@ -1,4 +1,4 @@
-RXP Quest Panel 0.5.0
+RXP Quest Panel 0.5.1
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -30,8 +30,8 @@ Looks
                    buttons, page-turn arrows, dashes for objectives and the
                    classic orange progress bars. No box behind it by default.
   Waypoint Rail    a dark panel with a thin line down the left: your current
-                   step is a ringed dot on the line, finished steps are faded,
-                   and the next step shows as a one-line preview.
+                   step is a ringed dot on the line and the step before it
+                   is a faded line. The > arrow still looks ahead.
 
 Commands
   /rxpq setup    place the box, set its largest size and pick a look (see above)
@@ -148,3 +148,7 @@ Changes in 0.5.0
     to place it, set its largest size and pick a look, with the panel as a
     live preview. Press Done to save. /rxpq setup opens it again. If you
     already used an older version, it opens once after this update.
+
+Changes in 0.5.1
+  - Waypoint Rail no longer shows a one-line preview of the next step under
+    the current one. Use the > arrow to look ahead.
