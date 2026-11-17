@@ -1,4 +1,4 @@
-RXP Quest Panel 0.4.1
+RXP Quest Panel 0.4.2
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -16,14 +16,15 @@ Install
 First-time setup (do this once)
   1. Type /rxpq setup. The panel gets a gold outline.
   2. Drag anywhere on it to move it.
-  3. Drag either bottom corner to resize it. The size shows at the bottom.
+  3. Drag either bottom corner to set its largest size. The size shows at the bottom.
   4. Type /rxpq setup again. The size and spot are saved and the panel is locked.
-  The box then stays exactly that size; when there's more to show than fits,
-  scroll inside it with the mouse wheel. Run /rxpq setup again any time to change it.
+  The box then only draws as tall as what's in it, up to that size; when there's
+  more to show than fits, scroll inside it with the mouse wheel. Run /rxpq setup
+  again any time to change it.
 
 Commands
   /rxpq setup    size and place the box (see above); run again to finish
-  /rxpq auto     go back to a box that grows with its content instead of a fixed size
+  /rxpq auto     clear the size you set in setup
   /rxpq toggle   switch between this panel and the stock RXP window
   /rxpq lock     lock / unlock dragging (drag by the GUIDE or QUESTS header)
   /rxpq reset    move the panel back to its default spot
@@ -115,3 +116,9 @@ Changes in 0.4.1
   - Tidier peek bar: while you look at another step, one slim blue line shows
     "STEP 33 done" with two small buttons, Back and Go here, instead of three
     loose lines. Hover a button to see what it does.
+
+Changes in 0.4.2
+  - The size you set in /rxpq setup is now the largest the box can get, not
+    a fixed size. The box only draws as tall as what's in it (for example
+    with QUESTS collapsed), growing down from the top, and scrolls once it
+    reaches that size. The full box only shows while you're in setup.

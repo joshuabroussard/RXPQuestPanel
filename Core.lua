@@ -1272,9 +1272,11 @@ local function RenderInner()
 
     local contentH = y + PAD - 4
     content:SetHeight(contentH)
-    -- A box sized in /rxpq setup stays that size and scrolls inside;
-    -- otherwise the panel grows with its content up to maxHeight.
-    local h = db.boxHeight or min(contentH, db.maxHeight)
+    -- The panel only draws as tall as its content, growing down from the top.
+    -- A size set in /rxpq setup is the most it can take (then it scrolls);
+    -- the full box only shows while you're in setup.
+    local maxH = db.boxHeight or db.maxHeight
+    local h = (panel.setup and db.boxHeight) or min(contentH, maxH)
     local room = SpaceBelowTop()
     if room and room > 60 then h = min(h, room) end
     if panel.sizing then
@@ -1612,8 +1614,8 @@ end)
 local function Help()
     Print("commands:")
     Print("  /rxpq toggle - switch between this panel and the stock RXP window")
-    Print("  /rxpq setup - size and place the box (drag to move, drag a bottom corner to resize); again to finish")
-    Print("  /rxpq auto - let the box grow with its content again instead of a fixed size")
+    Print("  /rxpq setup - place the box and set its largest size (drag to move, drag a bottom corner); again to finish")
+    Print("  /rxpq auto - clear the size you set in setup")
     Print("  /rxpq lock - lock or unlock dragging (drag the GUIDE/QUESTS headers)")
     Print("  /rxpq reset - put the panel back in its default spot")
     Print("  /rxpq quests - show or hide the quest section")
@@ -1639,7 +1641,7 @@ local function Debug()
           panel:IsShown() and "yes" or "no", panel:IsVisible() and "yes" or "no", floor(panel:GetWidth() + 0.5),
           floor(panel:GetHeight() + 0.5), tostring(panel:GetFrameStrata()), tostring(p), tostring(rp),
           tostring(x and floor(x)), tostring(yy and floor(yy)))
-    Print("box: %s", db.boxHeight and strformat("fixed %dx%d", db.width, db.boxHeight)
+    Print("box: %s", db.boxHeight and strformat("%d wide, up to %d tall (set in setup)", db.width, db.boxHeight)
           or strformat("grows with content, %d wide, up to %d tall", db.width, db.maxHeight))
     local seen = {}
     for _, name in ipairs(TRACKER_FRAMES) do
@@ -1673,16 +1675,16 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
             Print("the panel is off. Type /rxpq toggle first.")
         elseif panel.setup then
             SetSetupMode(false)
-            Print("box saved at %dx%d and locked. /rxpq setup to change it, /rxpq auto to let it grow.",
+            Print("saved: %d wide, up to %d tall, and locked. The box only draws as tall as its content.",
                   db.width, db.boxHeight or 0)
         else
             SetSetupMode(true)
-            Print("setup: drag the box to move it, drag a bottom corner to resize. Type /rxpq setup when done.")
+            Print("setup: drag the box to move it, drag a bottom corner to set its largest size. Type /rxpq setup when done.")
         end
     elseif cmd == "auto" then
         db.boxHeight = nil
         MarkDirty()
-        Print("box grows with its content again (up to %d tall).", db.maxHeight)
+        Print("size limit cleared: the box grows with its content up to %d tall.", db.maxHeight)
     elseif cmd == "lock" then
         db.locked = not db.locked
         Print(db.locked and "locked." or "unlocked: drag a section header to move.")
