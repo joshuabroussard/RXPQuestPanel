@@ -49,7 +49,7 @@ GetLocale=function() return "enUS" end
 BackdropTemplateMixin={}
 GetTime=os.clock
 C_Timer={After=function(_,f) f() end}
-hooksecurefunc=function(t,k,f) local old=t[k]; t[k]=function(...) local r={old(...)}; f(...); return unpack(r) end end
+hooksecurefunc=function(t,k,f) if type(t)=="string" then t,k,f=_G,t,k end local old=t[k]; t[k]=function(...) local r={old(...)}; f(...); return unpack(r) end end
 SlashCmdList={}
 COMBAT=false
 InCombatLockdown=function() return COMBAT end
@@ -65,6 +65,13 @@ GetNumQuestLogEntries=function() return #quests, 3 end
 GetQuestLogTitle=function(i) local q=quests[i]; return q[1],q[2],q[3],q[4],q[5],q[6],q[7],q[8] end
 GetNumQuestLeaderBoards=function(i) return i==2 and 1 or (i==4 and 1 or 0) end
 GetQuestLogLeaderBoard=function(j,i) if i==2 then return "Hardened Tortoise Shell: 4/9","item",false end return "Deadmire's Tooth: 0/1","item",false end
+WATCHED={[2]=true}
+SHIFT=false
+IsQuestWatched=function(i) return WATCHED[i] and 1 or nil end
+AddQuestWatch=function(i) WATCHED[i]=true end
+RemoveQuestWatch=function(i) WATCHED[i]=nil end
+GetNumQuestWatches=function() local n=0 for _ in pairs(WATCHED) do n=n+1 end return n end
+IsShiftKeyDown=function() return SHIFT end
 GetQuestDifficultyColor=function(l) return {r=1,g=1,b=0} end
 QuestWatchFrame=newObj("Frame")
 -- fake RXP

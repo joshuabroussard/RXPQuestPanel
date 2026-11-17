@@ -73,6 +73,7 @@ local DEFAULTS = {
     hideOtherTrackers = true,  -- hide Blizzard / Questie / Kaliel's tracker
     collapseGuide = false,
     collapseQuests = false,
+    allQuests = false,         -- false = only quests WoW is tracking (shift-click in the quest log)
     point = nil,               -- {point, relativePoint, x, y}
     boxHeight = nil,           -- set by /rxpq setup: fixed box height (nil = grow with content)
     setupHinted = false,
@@ -685,6 +686,37 @@ local function DifficultyColor(level)
     return C.text[1], C.text[2], C.text[3]
 end
 
+-- Blizzard's quest tracking (the "watch" list you shift-click in the quest log).
+local function IsWatched(index, questID)
+    if _G.IsQuestWatched then return _G.IsQuestWatched(index) and true or false end
+    local CQ = _G.C_QuestLog
+    if CQ and questID then
+        if CQ.GetQuestWatchType then return CQ.GetQuestWatchType(questID) ~= nil end
+        if CQ.IsQuestWatched then return CQ.IsQuestWatched(questID) and true or false end
+    end
+    return true -- no tracking API on this client: treat every quest as tracked
+end
+
+local function ToggleWatch(index, questID)
+    local CQ = _G.C_QuestLog
+    if _G.IsQuestWatched and _G.AddQuestWatch and _G.RemoveQuestWatch then
+        if _G.IsQuestWatched(index) then
+            _G.RemoveQuestWatch(index)
+        else
+            local maxW = _G.MAX_WATCHABLE_QUESTS or 5
+            if _G.GetNumQuestWatches and _G.GetNumQuestWatches() >= maxW then
+                local msg = _G.QUEST_WATCH_TOO_MANY and strformat(_G.QUEST_WATCH_TOO_MANY, maxW)
+                            or strformat("You can only track %d quests at a time.", maxW)
+                if _G.UIErrorsFrame then _G.UIErrorsFrame:AddMessage(msg, 1, 0.1, 0.1) end
+                return
+            end
+            _G.AddQuestWatch(index)
+        end
+    elseif CQ and questID and CQ.AddQuestWatch and CQ.RemoveQuestWatch then
+        if IsWatched(index, questID) then CQ.RemoveQuestWatch(questID) else CQ.AddQuestWatch(questID) end
+    end
+end
+
 local function OpenQuestLog(index)
     local qf = _G.QuestLogFrame
     if not qf then
@@ -1048,17 +1080,20 @@ end
 local function RenderQuests()
     local entries, numQuests = NumQuestEntries()
     local maxQuests = _G.MAX_QUESTLOG_QUESTS or 20
-    RenderHeader(questHeader, db.collapseQuests, strformat("%d/%d", numQuests, maxQuests))
-    if db.collapseQuests then return end
 
     local guideIds = GuideQuestIds()
     local linked, other = {}, {}
+    local nTracked, hidden = 0, 0
     for i = 1, entries do
         local title, level, group, isHeader, _, isComplete, questID = QuestInfo(i)
         if title and not isHeader then
+            local watched = IsWatched(i, questID)
+            if watched then nTracked = nTracked + 1 end
             local q = {index = i, title = title, level = level, group = group,
-                       complete = isComplete, id = questID}
-            if questID and guideIds[questID] then
+                       complete = isComplete, id = questID, watched = watched}
+            if not watched and not db.allQuests then
+                hidden = hidden + 1
+            elseif questID and guideIds[questID] then
                 linked[#linked + 1] = q
             else
                 other[#other + 1] = q
@@ -1066,8 +1101,14 @@ local function RenderQuests()
         end
     end
 
+    local count = strformat("%d/%d", numQuests, maxQuests)
+    if not db.allQuests then count = strformat("%d tracked, %s", nTracked, count) end
+    RenderHeader(questHeader, db.collapseQuests, count)
+    if db.collapseQuests then return end
+
     local function RenderQuest(q, isLinked)
         local r1, g1, b1 = DifficultyColor(q.level)
+        if not q.watched then r1, g1, b1 = r1 * 0.6, g1 * 0.6, b1 * 0.6 end
         local lvl = q.level and q.level > 0 and
                         strformat("[%d%s] ", q.level, (tonumber(q.group) or 0) > 0 and "+" or "") or ""
         local r = AddTextRow(lvl .. q.title, {
@@ -1076,12 +1117,21 @@ local function RenderQuests()
         })
         r.wMouse = true
         r.questIndex = q.index
-        r.onClick = function(self) OpenQuestLog(self.questIndex) end
+        r.questID = q.id
+        r.onClick = function(self)
+            if _G.IsShiftKeyDown and _G.IsShiftKeyDown() then
+                ToggleWatch(self.questIndex, self.questID)
+                panel.dirty = true
+            else
+                OpenQuestLog(self.questIndex)
+            end
+        end
         r.onEnter = function(self)
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:SetText(q.title, 1, 1, 1)
             if isLinked then GameTooltip:AddLine("Used by your current guide step", unpack(C.guideTag)) end
             GameTooltip:AddLine("Click: open in quest log", 0.8, 0.8, 0.8)
+            GameTooltip:AddLine(q.watched and "Shift-click: stop tracking" or "Shift-click: track", 0.8, 0.8, 0.8)
             GameTooltip:Show()
         end
 
@@ -1112,6 +1162,17 @@ local function RenderQuests()
     for _, q in ipairs(other) do RenderQuest(q, false) end
     if numQuests == 0 then
         AddTextRow("Quest log is empty.", {color = C.muted, size = 12, gap = 4})
+    elseif hidden > 0 then
+        local r = AddTextRow(strformat(nTracked == 0 and "No quests tracked (%d in your log). Click to show them all."
+                                       or "%d more not tracked. Click to show them all.", hidden),
+                             {color = C.muted, size = 11, gap = 4})
+        r.wMouse = true
+        r.onClick = function() db.allQuests = true; panel.dirty = true end
+    elseif db.allQuests and nTracked < numQuests then
+        local r = AddTextRow("Showing all quests. Click to show only tracked ones.",
+                             {color = C.muted, size = 11, gap = 4})
+        r.wMouse = true
+        r.onClick = function() db.allQuests = false; panel.dirty = true end
     end
 end
 
@@ -1435,6 +1496,13 @@ driver:RegisterEvent("PLAYER_ENTERING_WORLD")
 driver:RegisterEvent("QUEST_LOG_UPDATE")
 driver:RegisterEvent("QUEST_WATCH_UPDATE")
 driver:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
+pcall(driver.RegisterEvent, driver, "QUEST_WATCH_LIST_CHANGED") -- newer clients only
+-- Shift-clicking in the quest log changes tracking without a reliable event on old clients.
+for _, fn in ipairs({"AddQuestWatch", "RemoveQuestWatch"}) do
+    if type(_G[fn]) == "function" then hooksecurefunc(fn, function() panel.dirty = true end) end
+    local CQ = _G.C_QuestLog
+    if CQ and type(CQ[fn]) == "function" then hooksecurefunc(CQ, fn, function() panel.dirty = true end) end
+end
 driver:RegisterEvent("PLAYER_REGEN_ENABLED")
 driver:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
@@ -1487,6 +1555,7 @@ local function Help()
     Print("  /rxpq lock - lock or unlock dragging (drag the GUIDE/QUESTS headers)")
     Print("  /rxpq reset - put the panel back in its default spot")
     Print("  /rxpq quests - show or hide the quest section")
+    Print("  /rxpq allquests - show every quest, or only tracked ones (shift-click a quest to track it)")
     Print("  /rxpq tracker - hide or show your old quest tracker")
     Print("  /rxpq scale <0.5-2>, /rxpq width <200-600>, /rxpq height <80-1400>, /rxpq alpha <0-1>")
     Print("  /rxpq debug - print what the panel sees (send this if something looks wrong)")
@@ -1563,6 +1632,11 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
         db.showQuests = not db.showQuests
         MarkDirty()
         Print(db.showQuests and "quest section shown." or "quest section hidden.")
+    elseif cmd == "allquests" then
+        db.allQuests = not db.allQuests
+        MarkDirty()
+        Print(db.allQuests and "showing every quest in your log."
+              or "showing only the quests WoW is tracking (shift-click in the quest log).")
     elseif cmd == "tracker" then
         db.hideOtherTrackers = not db.hideOtherTrackers
         if db.hideOtherTrackers then HideOtherTrackers() else RestoreOtherTrackers() end

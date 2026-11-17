@@ -1,4 +1,4 @@
-RXP Quest Panel 0.3.0
+RXP Quest Panel 0.4.0
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -102,3 +102,11 @@ Changes in 0.3.0
   - "Move RestedXP to this step" moves RestedXP there for real.
   - Steps that are only tips are skipped while looking around.
   - Link lines work on any step you're looking at.
+
+Changes in 0.4.0
+  - The quests list now follows WoW's own quest tracking: it shows the quests
+    you track (shift-click in the quest log), like Blizzard's tracker does.
+  - Shift-click a quest in the panel to track or stop tracking it.
+  - A line under the list says how many quests aren't tracked. Click it to
+    show every quest, and click again to go back. /rxpq allquests does the same.
+  - The header shows how many quests are tracked and how full your log is.
