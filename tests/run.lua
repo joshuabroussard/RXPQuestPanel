@@ -210,10 +210,16 @@ local function arrow(sym) return find(panel, function(c) local t = rawget(c, "t"
 local prev, nxt = arrow("<"), arrow(">")
 assert(prev and nxt, "arrow buttons")
 local function rowText(txt) return find(panel, function(c) local t = rawget(c, "text"); return type(t) == "table" and rawget(t, "__text") == txt and c.__shown end)[1] end
+local function peekLabel()
+    local bar = find(panel, function(c) local l = rawget(c, "label"); local st = rawget(c, "state")
+        return l and st and c.__shown end)[1]
+    return bar and (rawget(bar.label, "__text") .. " " .. rawget(bar.state, "__text")), bar
+end
+local function isPeek(txt) return peekLabel() == txt end
 prev.__scripts.OnClick(prev, "LeftButton")
 driver.__scripts.OnUpdate(driver, 2)
 assert(#setCalls == 0, "previous doesn't move RestedXP")
-assert(rowText("LOOKING AT STEP 16 (done)"), "peek bar shows step 16")
+assert(isPeek("STEP 16 done"), "peek bar shows step 16")
 local link16 = rowText("CLICK HERE for a video")
 assert(link16 and rawget(link16, "onClick"), "links clickable while peeking")
 local shownUrl
@@ -223,22 +229,28 @@ link16.__scripts.OnClick(link16, "LeftButton")
 assert(shownUrl == "https://example.com/16", "peek link opens RXP's box")
 prev.__scripts.OnClick(prev, "LeftButton")      -- skips tip step 15
 driver.__scripts.OnUpdate(driver, 2)
-assert(rowText("LOOKING AT STEP 14 (done)"), "skips steps with nothing to show")
+assert(isPeek("STEP 14 done"), "skips steps with nothing to show")
 nxt.__scripts.OnClick(nxt, "LeftButton"); nxt.__scripts.OnClick(nxt, "LeftButton")  -- 16, then 17 = current
 driver.__scripts.OnUpdate(driver, 2)
-assert(not rowText("LOOKING AT STEP 16 (done)") and rowText("Run circles around The Shimmering Flats"), "back on the live view")
+assert(not peekLabel() and rowText("Run circles around The Shimmering Flats"), "back on the live view")
 nxt.__scripts.OnClick(nxt, "LeftButton")
 driver.__scripts.OnUpdate(driver, 2)
-assert(rowText("LOOKING AT STEP 18 (coming up)"), "next peeks ahead")
-local jump = rowText("Move RestedXP to this step")
-jump.__scripts.OnClick(jump, "LeftButton")
+assert(isPeek("STEP 18 coming up"), "next peeks ahead")
+local _, bar = peekLabel()
+assert(rawget(bar.back.t, "__text") == "Back" and rawget(bar.go.t, "__text") == "Go here", "one line with two buttons")
+assert(not rowText("Move RestedXP to this step") and not rowText("Back to your step (17)"), "no loose lines")
+bar.go.__scripts.OnClick(bar.go, "LeftButton")
 assert(setCalls[1] == 18, "jump moves RestedXP on request")
 driver.__scripts.OnUpdate(driver, 2)
-assert(not rowText("LOOKING AT STEP 18 (coming up)"), "jump ends the peek")
+assert(not peekLabel(), "jump ends the peek")
 nxt.__scripts.OnClick(nxt, "LeftButton")
 nxt.__scripts.OnClick(nxt, "RightButton")
 driver.__scripts.OnUpdate(driver, 2)
-assert(not rowText("LOOKING AT STEP 18 (coming up)"), "right-click returns to current")
+assert(not peekLabel(), "right-click returns to current")
+prev.__scripts.OnClick(prev, "LeftButton"); driver.__scripts.OnUpdate(driver, 2)
+local _, bar2 = peekLabel()
+bar2.back.__scripts.OnClick(bar2.back, "LeftButton"); driver.__scripts.OnUpdate(driver, 2)
+assert(not peekLabel(), "Back button returns to current")
 assert(#setCalls == 1, "only the explicit jump touched RestedXP")
 print("peek OK")
 -- v0.4.0: quests follow Blizzard's tracking

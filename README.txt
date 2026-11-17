@@ -1,4 +1,4 @@
-RXP Quest Panel 0.4.0
+RXP Quest Panel 0.4.1
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -110,3 +110,8 @@ Changes in 0.4.0
   - A line under the list says how many quests aren't tracked. Click it to
     show every quest, and click again to go back. /rxpq allquests does the same.
   - The header shows how many quests are tracked and how full your log is.
+
+Changes in 0.4.1
+  - Tidier peek bar: while you look at another step, one slim blue line shows
+    "STEP 33 done" with two small buttons, Back and Go here, instead of three
+    loose lines. Hover a button to see what it does.

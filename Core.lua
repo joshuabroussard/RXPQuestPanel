@@ -456,6 +456,65 @@ local prevBtn = NewNavButton("<", "Look at the previous step\n|cff9aa0a8RestedXP
 prevBtn:SetPoint("RIGHT", nextBtn, "LEFT", 0, 0)
 guideTitle.counter:SetPoint("RIGHT", prevBtn, "LEFT", -2, -1)
 
+-- Peek bar: one slim line shown while you look at a step other than your own.
+local peekBar = CreateFrame("Frame", nil, content)
+peekBar.bg = peekBar:CreateTexture(nil, "BACKGROUND")
+peekBar.bg:SetTexture(WHITE)
+peekBar.bg:SetAllPoints(peekBar)
+peekBar.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.08)
+peekBar.stripe = peekBar:CreateTexture(nil, "ARTWORK")
+peekBar.stripe:SetTexture(WHITE)
+peekBar.stripe:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.9)
+peekBar.stripe:SetPoint("TOPLEFT", peekBar, "TOPLEFT", 0, 0)
+peekBar.stripe:SetPoint("BOTTOMLEFT", peekBar, "BOTTOMLEFT", 0, 0)
+peekBar.stripe:SetWidth(2)
+peekBar.label = peekBar:CreateFontString(nil, "OVERLAY")
+SetFont(peekBar.label, HEAD_FONT, 10, "")
+peekBar.label:SetPoint("LEFT", peekBar, "LEFT", 8, 0)
+peekBar.label:SetTextColor(unpack(C.link))
+peekBar.state = peekBar:CreateFontString(nil, "OVERLAY")
+SetFont(peekBar.state, BODY_FONT, 11, "")
+peekBar.state:SetPoint("LEFT", peekBar.label, "RIGHT", 6, 0)
+peekBar.state:SetTextColor(unpack(C.muted))
+
+local function NewPillButton(parent, label)
+    local b = CreateFrame("Button", nil, parent)
+    b:RegisterForClicks("LeftButtonUp")
+    b.bg = b:CreateTexture(nil, "ARTWORK")
+    b.bg:SetTexture(WHITE)
+    b.bg:SetAllPoints(b)
+    b.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.16)
+    b.t = b:CreateFontString(nil, "OVERLAY")
+    SetFont(b.t, BODY_FONT, 11, "")
+    b.t:SetPoint("CENTER", 0, 0)
+    b.t:SetText(label)
+    b.t:SetTextColor(unpack(C.link))
+    b:SetSize(floor(b.t:GetStringWidth() + 14), 15)
+    b:SetScript("OnEnter", function(self)
+        self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.34)
+        self.t:SetTextColor(1, 1, 1)
+        if self.tip then
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:SetText(self.tip, 1, 1, 1)
+            if self.tip2 then GameTooltip:AddLine(self.tip2, 0.8, 0.8, 0.8, true) end
+            GameTooltip:Show()
+        end
+    end)
+    b:SetScript("OnLeave", function(self)
+        self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.16)
+        self.t:SetTextColor(unpack(C.link))
+        if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+    end)
+    return b
+end
+
+peekBar.back = NewPillButton(peekBar, "Back")
+peekBar.back:SetPoint("RIGHT", peekBar, "RIGHT", -3, 0)
+peekBar.go = NewPillButton(peekBar, "Go here")
+peekBar.go:SetPoint("RIGHT", peekBar.back, "LEFT", -4, 0)
+peekBar.go.tip = "Move RestedXP to this step"
+peekBar.go.tip2 = "RestedXP's guide and arrow continue from here."
+
 ---------------------------------------------------------------------------
 -- Reading RXP's data
 ---------------------------------------------------------------------------
@@ -991,24 +1050,27 @@ local function RenderPeek(guide, cur)
     if not title or title == "" then
         title = step.sticky and "Ongoing" or strformat("Step %d", step.index or peek.step)
     end
-    local when = peek.step < cur and "done" or "coming up"
-    AddTextRow(strformat("LOOKING AT STEP %d (%s)", peek.step, when),
-               {font = HEAD_FONT, size = 10, color = C.link, stripe = C.link, gap = 3})
-    local back = AddTextRow(strformat("Back to your step (%d)", cur), {x = PAD + 2, size = 12, color = C.link, gap = 3})
-    back.wMouse = true
-    back.onClick = StopPeek
-    local jump = AddTextRow("Move RestedXP to this step", {x = PAD + 2, size = 11, color = C.muted, gap = 6})
-    jump.wMouse = true
-    jump.onClick = function()
-        local R = RXP()
-        local n = peek.step
-        StopPeek()
-        if R and R.SetStep and n then pcall(R.SetStep, n) end
-    end
+    peekBar.label:SetText(strformat("STEP %d", peek.step))
+    peekBar.state:SetText(peek.step < cur and "done" or "coming up")
+    peekBar.back.tip = strformat("Back to your step (%d)", cur)
+    peekBar.back.tip2 = "Right-click either arrow does the same."
+    -- Size the buttons here: text width can read 0 before fonts finish loading.
+    peekBar.back:SetWidth(max(38, floor(peekBar.back.t:GetStringWidth() + 14)))
+    peekBar.go:SetWidth(max(52, floor(peekBar.go.t:GetStringWidth() + 14)))
+    PlaceFrame(peekBar, PAD, 20)
+    y = y + 7
     AddTextRow(title:upper(), {font = HEAD_FONT, size = 10, color = C.accent, stripe = C.accent, gap = 3})
     RenderElements(step, true)
     y = y + 5
 end
+
+peekBar.back:SetScript("OnClick", function() StopPeek() end)
+peekBar.go:SetScript("OnClick", function()
+    local R = RXP()
+    local n = peek.step
+    StopPeek()
+    if R and R.SetStep and n then pcall(R.SetStep, n) end
+end)
 
 local function RenderGuide()
     local f = RXPFrame()
@@ -1204,7 +1266,7 @@ local function RenderInner()
         RenderQuests()
     end
     FinishRows()
-    for _, fr in ipairs({guideHeader, guideTitle, questHeader}) do
+    for _, fr in ipairs({guideHeader, guideTitle, peekBar, questHeader}) do
         Vis(fr, fr.placedGen == renderGen)
     end
 
