@@ -19,7 +19,7 @@ WowUp checks this repository's releases for updates like any other addon.
 Download `RXPQuestPanel-v<version>.zip` from the latest release and unzip it into
 `Interface\AddOns`, so you get `Interface\AddOns\RXPQuestPanel\RXPQuestPanel.toc`.
 
-See `README.txt` for commands and setup (`/rxpq setup`).
+Two looks, Blizzard Native and Waypoint Rail. Setup opens on first login to place and size the panel and pick a look; `/rxpq setup` reopens it and `/rxpq style` switches looks. See `README.txt` for all commands.
 
 Upgrading from the old RXPUnified addon: delete `Interface\AddOns\RXPUnified`,
 or both copies will load.

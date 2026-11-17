@@ -7,6 +7,17 @@ assert(driver, "driver frame")
 local ev=driver.__scripts.OnEvent
 ev(driver,"ADDON_LOADED","RXPQuestPanel")
 ev(driver,"PLAYER_LOGIN")
+-- First load: setup opens by itself, with a look picker beside the panel
+local setupWin = _G.RXPQuestPanelSetup
+assert(rawget(_G.RXPQuestPanelFrame, "setup") == true and setupWin.__shown, "first-time setup opens on its own")
+rawget(setupWin, "rail").__scripts.OnClick(rawget(setupWin, "rail"))
+assert(RXPQuestPanelDB.style == "rail", "setup picks Waypoint Rail")
+rawget(setupWin, "blizzard").__scripts.OnClick(rawget(setupWin, "blizzard"))
+assert(RXPQuestPanelDB.style == "blizzard", "setup picks Blizzard Native")
+rawget(setupWin, "done").__scripts.OnClick(rawget(setupWin, "done"))
+assert(RXPQuestPanelDB.setupDone == true and not setupWin.__shown and rawget(_G.RXPQuestPanelFrame, "setup") == false,
+       "Done saves and closes setup")
+print("first-time setup OK")
 ev(driver,"PLAYER_ENTERING_WORLD", true)
 driver.__scripts.OnUpdate(driver, 2)
 ev(driver,"QUEST_LOG_UPDATE")
@@ -220,7 +231,7 @@ local function peekLabel()
         return l and st and c.__shown end)[1]
     return bar and (rawget(bar.label, "__text") .. " " .. rawget(bar.state, "__text")), bar
 end
-local function isPeek(txt) return peekLabel() == txt end
+local function isPeek(txt) local l = peekLabel(); return l and l:lower() == txt:lower() end
 prev.__scripts.OnClick(prev, "LeftButton")
 driver.__scripts.OnUpdate(driver, 2)
 assert(#setCalls == 0, "previous doesn't move RestedXP")
@@ -306,4 +317,24 @@ bar.__shown = false
 driver.__scripts.OnUpdate(driver, 2)
 assert(not slot(), "no gap left once the flight ends")
 print("flight timer OK")
+-- Switching looks redraws without errors, and the rail look labels steps in capitals
+local chat = {}
+local oldPrint = _G.DEFAULT_CHAT_FRAME.AddMessage
+_G.DEFAULT_CHAT_FRAME.AddMessage = function(self, m) chat[#chat + 1] = m; return oldPrint(self, m) end
+SlashCmdList.RXPQUESTPANEL("style")
+assert(RXPQuestPanelDB.style == "rail", "/rxpq style toggles to rail")
+driver.__scripts.OnUpdate(driver, 2)
+prev.__scripts.OnClick(prev, "LeftButton")
+driver.__scripts.OnUpdate(driver, 2)
+assert((peekLabel() or ""):match("^STEP %d+"), "rail look labels peeks STEP n")
+prev.__scripts.OnClick(prev, "RightButton")
+SlashCmdList.RXPQUESTPANEL("style native")
+assert(RXPQuestPanelDB.style == "blizzard", "/rxpq style native picks Blizzard")
+driver.__scripts.OnUpdate(driver, 2)
+SlashCmdList.RXPQUESTPANEL("style bogus")
+assert(RXPQuestPanelDB.style == "blizzard", "unknown look leaves the style alone")
+SlashCmdList.RXPQUESTPANEL("alpha 0.4")
+assert(RXPQuestPanelDB.blizzShade == 0.4, "alpha sets the Blizzard shade")
+for _, m in ipairs(chat) do assert(not tostring(m):find("drawing error"), "no drawing error after a look switch: " .. tostring(m)) end
+print("look switch OK")
 print("ALL OK")

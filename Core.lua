@@ -55,7 +55,34 @@ local C = {
     guideTag = {0.30, 0.78, 0.95},       -- marks quests the current step uses
 }
 
+-- The two looks. Each one swaps the colors above in place (C is shared by
+-- every drawing function), so switching looks is just ApplyTheme + redraw.
+local PALETTES = {
+    blizzard = {   -- Blizzard Native: like the game's own objective tracker
+        bg = {0, 0, 0}, border = {0, 0, 0, 0},
+        accent = {1.00, 0.82, 0.00},          -- Blizzard gold (step and quest titles)
+        text = {0.92, 0.92, 0.92}, muted = {0.62, 0.62, 0.62},
+        done = {0.25, 0.85, 0.31}, fail = {0.95, 0.30, 0.25},
+        link = {0.40, 0.73, 1.00}, barBG = {0, 0, 0, 0.75}, barFill = {0.18, 0.54, 0.90},
+        boxEdge = {0.45, 0.45, 0.45, 1}, boxFill = {0.06, 0.06, 0.06, 1},
+        guideTag = {0.31, 0.84, 1.00}, sticky = {1.00, 0.82, 0.00}, head = {1.00, 0.82, 0.00},
+    },
+    rail = {       -- Waypoint Rail: smoked glass, every step on one route line
+        bg = {0.047, 0.063, 0.098}, border = {1, 1, 1, 0.08},
+        accent = {0.95, 0.72, 0.29},
+        text = {0.91, 0.93, 0.95}, muted = {0.56, 0.60, 0.66},
+        done = {0.35, 0.84, 0.48}, fail = {0.95, 0.35, 0.32},
+        link = {0.42, 0.72, 1.00}, barBG = {1, 1, 1, 0.08}, barFill = {0.95, 0.72, 0.29},
+        boxEdge = {0.35, 0.39, 0.48, 1}, boxFill = {0.07, 0.09, 0.13, 1},
+        guideTag = {0.37, 0.83, 0.91}, sticky = {0.72, 0.65, 1.00}, head = {0.56, 0.60, 0.66},
+    },
+}
+local STYLE_NAMES = {blizzard = "Blizzard Native", rail = "Waypoint Rail"}
+local style = "blizzard"
+local function IsRail() return style == "rail" end
+
 local PAD = 10          -- inner padding
+local RAIL = 20         -- Waypoint Rail: room on the left for the route line
 local INDENT = 14       -- element / objective indent
 local BOX = 11          -- checkbox size
 
@@ -77,6 +104,9 @@ local DEFAULTS = {
     point = nil,               -- {point, relativePoint, x, y}
     boxHeight = nil,           -- set by /rxpq setup: fixed box height (nil = grow with content)
     setupHinted = false,
+    setupDone = false,         -- first-time setup (place, size, pick a look) finished
+    style = "blizzard",        -- "blizzard" (Blizzard Native) or "rail" (Waypoint Rail)
+    blizzShade = 0,            -- Blizzard Native draws no box; /rxpq alpha adds a dark shade
 }
 
 local db
@@ -157,7 +187,8 @@ local RestorePosition    -- defined below
 local function ApplyLook()
     if panel.SetBackdrop then
         panel:SetBackdrop({bgFile = WHITE, edgeFile = WHITE, edgeSize = 1})
-        panel:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], db.bgAlpha)
+        local a = IsRail() and db.bgAlpha or db.blizzShade or 0
+        panel:SetBackdropColor(C.bg[1], C.bg[2], C.bg[3], a)
         panel:SetBackdropBorderColor(unpack(C.border))
     end
     if panel:GetScale() ~= db.scale then
@@ -217,9 +248,23 @@ end
 -- A FontString with no font throws "Font not set" on SetText, so this must
 -- always leave one in place, whatever fonts the client ships.
 local function SetFont(fs, font, size, flags)
+    if fs.SetShadowOffset then
+        fs:SetShadowOffset(1, -1)              -- readable over bright ground with no box behind
+        fs:SetShadowColor(0, 0, 0, 0.9)
+    end
     if font and fs:SetFont(font, size, flags or "") then return end
     if _G.STANDARD_TEXT_FONT and fs:SetFont(_G.STANDARD_TEXT_FONT, size, flags or "") then return end
     fs:SetFontObject(_G.GameFontHighlightSmall or _G.GameFontNormal)
+end
+
+-- Horizontal fade on a texture, across old and new client APIs.
+local function Fade(tex, r, g, b, a1, a2)
+    tex:SetTexture(WHITE)
+    tex:SetVertexColor(1, 1, 1, 1)
+    if _G.CreateColor and pcall(tex.SetGradient, tex, "HORIZONTAL",
+            _G.CreateColor(r, g, b, a1), _G.CreateColor(r, g, b, a2)) then return end
+    if tex.SetGradientAlpha and pcall(tex.SetGradientAlpha, tex, "HORIZONTAL", r, g, b, a1, r, g, b, a2) then return end
+    tex:SetVertexColor(r, g, b, (a1 + a2) / 2)
 end
 
 local function NewCheck(parent)
@@ -240,7 +285,26 @@ local function NewCheck(parent)
     hl:SetAllPoints()
     hl:SetTexture(WHITE)
     hl:SetVertexColor(1, 1, 1, 0.15)
+    b.dash = b:CreateFontString(nil, "OVERLAY")
+    SetFont(b.dash, HEAD_FONT, 12, "")
+    b.dash:SetPoint("CENTER", 0, 0)
+    b.dash:SetText("-")
     b.SetState = function(self, checked)
+        if not IsRail() then
+            -- Blizzard Native: a dash like the game's tracker, a green tick once done
+            self.edge:SetVertexColor(0, 0, 0, 0)
+            self.fill:SetVertexColor(0, 0, 0, 0)
+            self.dash:SetTextColor(unpack(C.text))
+            if checked then
+                self.mark:SetVertexColor(C.done[1], C.done[2], C.done[3], 1)
+                self.mark:Show(); self.dash:Hide()
+            else
+                self.mark:Hide(); self.dash:Show()
+            end
+            return
+        end
+        self.dash:Hide()
+        self.mark:SetVertexColor(1, 1, 1, 1)
         if checked then
             self.edge:SetVertexColor(C.done[1], C.done[2], C.done[3], 1)
             self.fill:SetVertexColor(C.done[1] * 0.35, C.done[2] * 0.35, C.done[3] * 0.35, 1)
@@ -296,10 +360,26 @@ local function NewRow()
         if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end)
 
+    r.barEdge = r:CreateTexture(nil, "BORDER")
+    r.barEdge:SetTexture(WHITE)
     r.barBG = r:CreateTexture(nil, "ARTWORK")
     r.barBG:SetTexture(WHITE)
     r.bar = r:CreateTexture(nil, "OVERLAY")
     r.bar:SetTexture(WHITE)
+    r.pct = r:CreateFontString(nil, "OVERLAY")
+    SetFont(r.pct, BODY_FONT, 9, "")
+    r.pct:SetPoint("CENTER", r.barBG, "CENTER", 0, 0)
+    r.pct:SetTextColor(1, 1, 1)
+
+    -- Waypoint Rail: the step's marker on the route line (a diamond)
+    r.nodeBack = r:CreateTexture(nil, "ARTWORK")
+    r.nodeBack:SetTexture(WHITE)
+    r.node = r:CreateTexture(nil, "OVERLAY")
+    r.node:SetTexture(WHITE)
+    if r.node.SetRotation then
+        pcall(r.node.SetRotation, r.node, math.rad(45))
+        pcall(r.nodeBack.SetRotation, r.nodeBack, math.rad(45))
+    end
 
     r:SetScript("OnClick", function(self, button)
         if self.onClick then self.onClick(self, button) end
@@ -343,6 +423,7 @@ local function AcquireRow()
     r.onClick, r.onEnter, r.onCheck, r.element, r.questIndex = nil, nil, nil, nil, nil
     -- what this row should show; applied once at the end of the redraw
     r.wStripe, r.wCheck, r.wBarBG, r.wBar, r.wRight, r.wMouse = false, false, false, false, false, false
+    r.wNode, r.wNodeBack, r.wPct, r.wEdge = false, false, false, false
     return r
 end
 
@@ -354,6 +435,10 @@ local function FinishRows()
         Vis(r.barBG, r.wBarBG)
         Vis(r.bar, r.wBar)
         Vis(r.right, r.wRight)
+        Vis(r.node, r.wNode)
+        Vis(r.nodeBack, r.wNodeBack)
+        Vis(r.pct, r.wPct)
+        Vis(r.barEdge, r.wEdge)
         Mouse(r, r.wMouse)
     end
     for i = rowsUsed + 1, #rowPool do Vis(rowPool[i], false) end
@@ -366,11 +451,20 @@ local function NewHeader(label)
     local h = CreateFrame("Button", nil, content)
     h:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     h:RegisterForDrag("LeftButton")
+    h.bar = h:CreateTexture(nil, "BACKGROUND")       -- Blizzard Native: fading header bar
+    h.bar:SetAllPoints(h)
+    h.top = h:CreateTexture(nil, "BORDER")           -- and its thin gold top edge
+    h.top:SetPoint("TOPLEFT", h, "TOPLEFT", 0, 0)
+    h.top:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
+    h.top:SetHeight(1)
     h.label = h:CreateFontString(nil, "OVERLAY")
     SetFont(h.label, HEAD_FONT, 10, "")
     h.label:SetPoint("LEFT", h, "LEFT", 0, 0)
     h.label:SetTextColor(unpack(C.muted))
     h.label:SetText(label)
+    h.plus = h:CreateTexture(nil, "OVERLAY")       -- Blizzard Native: the game's +/- button
+    h.plus:SetSize(14, 14)
+    h.plus:SetPoint("RIGHT", h, "RIGHT", -2, 0)
     h.arrow = h:CreateFontString(nil, "OVERLAY")
     SetFont(h.arrow, HEAD_FONT, 10, "")
     h.arrow:SetPoint("RIGHT", h, "RIGHT", 0, 0)
@@ -432,6 +526,16 @@ local function NewNavButton(symbol, tip)
     local b = CreateFrame("Button", nil, guideTitle)
     b:SetSize(16, 16)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b.page = symbol == "<" and "Interface\\Buttons\\UI-SpellbookIcon-PrevPage" or "Interface\\Buttons\\UI-SpellbookIcon-NextPage"
+    b.icon = b:CreateTexture(nil, "ARTWORK")          -- Blizzard Native: round gold page arrows
+    b.icon:SetPoint("CENTER", 0, 0)
+    b.icon:SetSize(24, 24)
+    b.bg = b:CreateTexture(nil, "BACKGROUND")         -- Waypoint Rail: small dark key
+    b.bg:SetAllPoints(b)
+    b.bg:SetTexture(WHITE)
+    b.bg:SetVertexColor(1, 1, 1, 0.06)
+    b:SetScript("OnMouseDown", function(self) if not IsRail() then self.icon:SetTexture(self.page .. "-Down") end end)
+    b:SetScript("OnMouseUp", function(self) if not IsRail() then self.icon:SetTexture(self.page .. "-Up") end end)
     b.t = b:CreateFontString(nil, "OVERLAY")
     SetFont(b.t, HEAD_FONT, 13, "")
     b.t:SetPoint("CENTER", 0, 1)
@@ -439,12 +543,14 @@ local function NewNavButton(symbol, tip)
     b.t:SetTextColor(unpack(C.muted))
     b:SetScript("OnEnter", function(self)
         self.t:SetTextColor(unpack(C.accent))
+        if not IsRail() then self.icon:SetVertexColor(1.2, 1.2, 1.2) end
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:SetText(tip, 1, 1, 1)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function(self)
         self.t:SetTextColor(unpack(C.muted))
+        self.icon:SetVertexColor(1, 1, 1)
         if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end)
     return b
@@ -455,6 +561,23 @@ nextBtn:SetPoint("TOPRIGHT", guideTitle, "TOPRIGHT", 2, 1)
 local prevBtn = NewNavButton("<", "Look at the previous step\n|cff9aa0a8RestedXP stays on your step. Right-click: back to current.|r")
 prevBtn:SetPoint("RIGHT", nextBtn, "LEFT", 0, 0)
 guideTitle.counter:SetPoint("RIGHT", prevBtn, "LEFT", -2, -1)
+
+-- Waypoint Rail: how far through the guide you are, under the guide name
+guideTitle.progBG = guideTitle:CreateTexture(nil, "ARTWORK")
+guideTitle.progBG:SetTexture(WHITE)
+guideTitle.progBG:SetPoint("BOTTOMLEFT", guideTitle, "BOTTOMLEFT", 0, 0)
+guideTitle.progBG:SetPoint("BOTTOMRIGHT", guideTitle, "BOTTOMRIGHT", 0, 0)
+guideTitle.progBG:SetHeight(3)
+guideTitle.prog = guideTitle:CreateTexture(nil, "OVERLAY")
+guideTitle.prog:SetTexture(WHITE)
+guideTitle.prog:SetPoint("TOPLEFT", guideTitle.progBG, "TOPLEFT", 0, 0)
+guideTitle.prog:SetHeight(3)
+
+-- Waypoint Rail: the route line the steps sit on
+local railLine = content:CreateTexture(nil, "BACKGROUND")
+railLine:SetTexture(WHITE)
+railLine:SetWidth(2)
+railLine:Hide()
 
 -- Peek bar: one slim line shown while you look at a step other than your own.
 local peekBar = CreateFrame("Frame", nil, content)
@@ -481,18 +604,33 @@ local function NewPillButton(parent, label)
     local b = CreateFrame("Button", nil, parent)
     b:RegisterForClicks("LeftButtonUp")
     b.bg = b:CreateTexture(nil, "ARTWORK")
-    b.bg:SetTexture(WHITE)
     b.bg:SetAllPoints(b)
-    b.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.16)
     b.t = b:CreateFontString(nil, "OVERLAY")
     SetFont(b.t, BODY_FONT, 11, "")
     b.t:SetPoint("CENTER", 0, 0)
+    b:SetSize(48, 15)
+    -- Blizzard Native: the game's red panel button. Waypoint Rail: a soft blue key.
+    b.Restyle = function(self, hover)
+        if IsRail() then
+            self.bg:SetTexture(WHITE)
+            self.bg:SetTexCoord(0, 1, 0, 1)
+            self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], hover and 0.34 or 0.16)
+            SetFont(self.t, BODY_FONT, 11, "")
+            if hover then self.t:SetTextColor(1, 1, 1) else self.t:SetTextColor(unpack(C.link)) end
+            self:SetHeight(15)
+        else
+            self.bg:SetTexture("Interface\\Buttons\\UI-Panel-Button-Up")
+            self.bg:SetTexCoord(0, 0.625, 0, 0.6875)
+            local v = hover and 1.25 or 1
+            self.bg:SetVertexColor(v, v, v, 1)
+            SetFont(self.t, HEAD_FONT, 10, "")
+            if hover then self.t:SetTextColor(1, 1, 1) else self.t:SetTextColor(1, 0.82, 0) end
+            self:SetHeight(18)
+        end
+    end
     b.t:SetText(label)
-    b.t:SetTextColor(unpack(C.link))
-    b:SetSize(floor(b.t:GetStringWidth() + 14), 15)
     b:SetScript("OnEnter", function(self)
-        self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.34)
-        self.t:SetTextColor(1, 1, 1)
+        self:Restyle(true)
         if self.tip then
             GameTooltip:SetOwner(self, "ANCHOR_LEFT")
             GameTooltip:SetText(self.tip, 1, 1, 1)
@@ -501,8 +639,7 @@ local function NewPillButton(parent, label)
         end
     end)
     b:SetScript("OnLeave", function(self)
-        self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.16)
-        self.t:SetTextColor(unpack(C.link))
+        self:Restyle(false)
         if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end)
     return b
@@ -515,6 +652,21 @@ peekBar.go:SetPoint("RIGHT", peekBar.back, "LEFT", -4, 0)
 peekBar.go.tip = "Move RestedXP to this step"
 
 peekBar.go.tip2 = "RestedXP's guide and arrow continue from here."
+function peekBar:Restyle()
+    if IsRail() then
+        self.bg:SetTexture(WHITE)
+        self.bg:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.10)
+        SetFont(self.label, HEAD_FONT, 10, "")
+    else
+        Fade(self.bg, 0.08, 0.24, 0.43, 0.85, 0.30)
+        SetFont(self.label, HEAD_FONT, 12, "")
+    end
+    self.stripe:SetVertexColor(C.link[1], C.link[2], C.link[3], 0.9)
+    self.label:SetTextColor(IsRail() and C.link[1] or 0.81, IsRail() and C.link[2] or 0.91, IsRail() and C.link[3] or 1)
+    self.state:SetTextColor(IsRail() and C.muted[1] or 0.61, IsRail() and C.muted[2] or 0.78, IsRail() and C.muted[3] or 0.93)
+    self.back:Restyle(false)
+    self.go:Restyle(false)
+end
 
 ---------------------------------------------------------------------------
 -- Reading RXP's data
@@ -846,21 +998,52 @@ local function AddTextRow(text, opts)
     if opts.progress then
         local cur, total = opts.progress[1], opts.progress[2]
         local barW = max(10, w)
+        local frac = total > 0 and min(1, cur / total) or 0
+        local barH = IsRail() and 3 or 11          -- Blizzard Native: a real status bar with a % in it
         r.barBG:ClearAllPoints()
-        r.barBG:SetPoint("TOPLEFT", r, "TOPLEFT", textX, -(h + 1))
-        r.barBG:SetSize(barW, 3)
+        r.barBG:SetPoint("TOPLEFT", r, "TOPLEFT", textX, -(h + (IsRail() and 1 or 3)))
+        r.barBG:SetSize(barW, barH)
         r.barBG:SetVertexColor(unpack(C.barBG))
         r.wBarBG = true
-        local frac = total > 0 and cur / total or 0
+        if not IsRail() then
+            r.barEdge:ClearAllPoints()
+            r.barEdge:SetPoint("TOPLEFT", r.barBG, "TOPLEFT", -1, 1)
+            r.barEdge:SetPoint("BOTTOMRIGHT", r.barBG, "BOTTOMRIGHT", 1, -1)
+            r.barEdge:SetVertexColor(0.30, 0.30, 0.30, 0.9)
+            r.wEdge = true
+            r.pct:SetText(strformat("%d%%", floor(frac * 100 + 0.5)))
+            r.wPct = true
+        end
         if frac > 0 then
             r.bar:ClearAllPoints()
             r.bar:SetPoint("TOPLEFT", r.barBG, "TOPLEFT", 0, 0)
-            r.bar:SetSize(max(1, barW * frac), 3)
-            local bc = frac >= 1 and C.done or C.accent
+            r.bar:SetSize(max(1, barW * frac), barH)
+            local bc = frac >= 1 and C.done or C.barFill
             r.bar:SetVertexColor(bc[1], bc[2], bc[3], 0.9)
             r.wBar = true
         end
-        h = h + 6
+        h = h + (IsRail() and 6 or 16)
+    end
+
+    if opts.node then
+        -- a diamond on the route line, RAIL px left of the row
+        local n = opts.node
+        local size = n.size or 8
+        r.node:ClearAllPoints()
+        r.node:SetPoint("CENTER", r, "TOPLEFT", -RAIL + 7, -(n.dy or 6))
+        r.node:SetSize(size, size)
+        r.node:SetVertexColor(n.color[1], n.color[2], n.color[3], 1)
+        r.wNode = true
+        r.nodeBack:ClearAllPoints()
+        r.nodeBack:SetPoint("CENTER", r.node, "CENTER", 0, 0)
+        local ring = n.ring
+        r.nodeBack:SetSize(size + (ring and 6 or 4), size + (ring and 6 or 4))
+        if ring then
+            r.nodeBack:SetVertexColor(ring[1], ring[2], ring[3], 0.85)
+        else
+            r.nodeBack:SetVertexColor(C.bg[1], C.bg[2], C.bg[3], 1)
+        end
+        r.wNodeBack = true
     end
 
     if opts.stripe then
@@ -965,9 +1148,65 @@ local function ToggleElement(row)
 end
 
 local function RenderHeader(header, collapsed, rightText)
-    header.arrow:SetText((rightText and (rightText .. "   ") or "") .. (collapsed and "+" or "-"))
-    PlaceFrame(header, PAD, 14)
-    y = y + 4
+    if IsRail() then
+        header.arrow:SetText((rightText and (rightText .. "   ") or "") .. (collapsed and "+" or "-"))
+        PlaceFrame(header, PAD, 14)
+        y = y + 4
+    else
+        -- Blizzard Native: a fading bar the width of the panel, gold title, +/- button
+        header.plus:SetTexture(collapsed and "Interface\\Buttons\\UI-PlusButton-Up"
+                                             or "Interface\\Buttons\\UI-MinusButton-Up")
+        header.arrow:SetText(rightText or "")
+        PlaceFrame(header, 2, 20)
+        y = y + 5
+    end
+end
+
+-- Restyle the parts that persist between redraws for the current look.
+local function ApplyTheme()
+    style = (db and PALETTES[db.style or ""]) and db.style or "blizzard"
+    for k, v in pairs(PALETTES[style]) do C[k] = v end
+    local rail = IsRail()
+    for _, h in ipairs({guideHeader, questHeader}) do
+        Vis(h.bar, not rail)
+        Vis(h.top, not rail)
+        Vis(h.plus, not rail)
+        Vis(h.line, rail)
+        if rail then
+            SetFont(h.label, HEAD_FONT, 10, "")
+            h.label:SetTextColor(unpack(C.muted))
+            h.label:ClearAllPoints(); h.label:SetPoint("LEFT", h, "LEFT", 0, 0)
+            SetFont(h.arrow, HEAD_FONT, 10, "")
+            h.arrow:ClearAllPoints(); h.arrow:SetPoint("RIGHT", h, "RIGHT", 0, 0)
+        else
+            Fade(h.bar, 0.16, 0.09, 0.02, 0.92, 0)
+            h.top:SetTexture(WHITE)
+            h.top:SetVertexColor(1, 0.82, 0, 0.35)
+            SetFont(h.label, HEAD_FONT, 13, "")
+            h.label:SetTextColor(unpack(C.accent))
+            h.label:ClearAllPoints(); h.label:SetPoint("LEFT", h, "LEFT", 8, 0)
+            SetFont(h.arrow, BODY_FONT, 11, "")
+            h.arrow:ClearAllPoints(); h.arrow:SetPoint("RIGHT", h.plus, "LEFT", -6, 0)
+        end
+        h.arrow:SetTextColor(unpack(C.muted))
+    end
+    SetFont(guideTitle.name, HEAD_FONT, rail and 14 or 15, "")
+    guideTitle.name:SetTextColor(rail and C.text[1] or 1, rail and C.text[2] or 1, rail and C.text[3] or 1)
+    guideTitle.group:SetTextColor(unpack(C.muted))
+    for _, b in ipairs({prevBtn, nextBtn}) do
+        Vis(b.icon, not rail)
+        Vis(b.bg, rail)
+        Vis(b.t, rail)
+        b:SetSize(rail and 16 or 20, rail and 16 or 20)
+        if not rail then b.icon:SetTexture(b.page .. "-Up") end
+    end
+    prevBtn:ClearAllPoints()
+    prevBtn:SetPoint("RIGHT", nextBtn, "LEFT", rail and -2 or 2, 0)
+    guideTitle.progBG:SetVertexColor(unpack(C.barBG))
+    guideTitle.prog:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], 1)
+    railLine:SetVertexColor(1, 1, 1, 0.14)
+    if peekBar then peekBar:Restyle() end
+    if ApplyLook then ApplyLook() end
 end
 
 ---------------------------------------------------------------------------
@@ -1010,7 +1249,10 @@ local function PeekMove(dir)
     end
 end
 
+local function StepX() return IsRail() and (PAD + RAIL) or (PAD + 2) end
+
 local function RenderElements(step, peeking)
+    local ex = StepX()
     for _, element in ipairs(step.elements or {}) do
         local text = ElementText(element)
         if text then
@@ -1019,15 +1261,16 @@ local function RenderElements(step, peeking)
             local r
             local clickable = element.textOnly and (element.url or element.next) and true or false
             if element.textOnly then
-                r = AddTextRow(text, {x = PAD + 2, size = 12,
+                r = AddTextRow(text, {x = ex, size = 12,
                                       color = clickable and C.link or C.text, gap = 3})
             else
                 local cur2, tot2 = ParseProgress(text)
                 r = AddTextRow(text, {
-                    x = PAD + 2, size = 12,
+                    x = ex, size = 12,
                     color = isDone and C.muted or C.text,
                     check = isDone,
                     progress = cur2 and {cur2, tot2} or nil,
+                    rightText = (cur2 and IsRail()) and strformat("%d%%", floor(min(1, cur2 / tot2) * 100 + 0.5)) or nil,
                     gap = 3,
                 })
                 if not peeking then r.onCheck = ToggleElement end
@@ -1045,13 +1288,65 @@ local function RenderElements(step, peeking)
     end
 end
 
+-- One step's title line. kind: "sticky", "current", "done", "ahead", "viewing".
+local function StepHeader(title, kind)
+    if not IsRail() then
+        -- Blizzard Native: gold title in the game's font, like a tracked quest
+        return AddTextRow(title, {font = HEAD_FONT, size = 13, color = C.head, gap = 2})
+    end
+    local col = (kind == "sticky" and C.sticky) or (kind == "current" and C.accent)
+                or (kind == "done" and C.done) or (kind == "viewing" and C.link) or C.muted
+    local node = {color = col, size = 8, dy = 6}
+    if kind == "current" then node.size, node.ring = 9, {C.accent[1] * 0.35, C.accent[2] * 0.35, C.accent[3] * 0.35}
+    elseif kind == "viewing" then node.ring = C.link end
+    return AddTextRow(title:upper(), {x = PAD + RAIL, font = HEAD_FONT, size = 10, color = col, node = node, gap = 2})
+end
+
+-- Waypoint Rail: a one-line preview of the step before or after yours.
+-- Clicking it looks at that step (RestedXP stays put).
+local function GhostRow(step, dir, done)
+    local text
+    for _, element in ipairs(step.elements or {}) do
+        text = ElementText(element)
+        if text then break end
+    end
+    if not text then return end
+    text = StripCodes(text)
+    if #text > 42 then text = text:sub(1, 40) .. "..." end
+    local r = AddTextRow(strformat("%d  %s", step.index or 0, text), {
+        x = PAD + RAIL, size = 11, color = C.muted, gap = 5,
+        node = {color = done and C.done or {0.23, 0.27, 0.34}, size = 6, dy = 7},
+    })
+    r.wMouse = true
+    r.onClick = function() PeekMove(dir) end
+    r.onEnter = function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText(dir < 0 and "Look at the previous step" or "Look at the next step", 1, 1, 1)
+        GameTooltip:AddLine("RestedXP stays on your step.", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end
+end
+
+local railTop
+local function RailMark() if IsRail() and not railTop then railTop = y end end
+local function RailEnd()
+    if not (IsRail() and railTop) then return end
+    local h = y - railTop - 6
+    if h > 8 then
+        railLine:ClearAllPoints()
+        railLine:SetPoint("TOPLEFT", content, "TOPLEFT", PAD + 6, -(railTop + 4))
+        railLine:SetHeight(h)
+        railLine.placedGen = renderGen
+    end
+end
+
 local function RenderPeek(guide, cur)
     local step = guide.steps[peek.step]
     local title = step.title
     if not title or title == "" then
         title = step.sticky and "Ongoing" or strformat("Step %d", step.index or peek.step)
     end
-    peekBar.label:SetText(strformat("STEP %d", peek.step))
+    peekBar.label:SetText(strformat(IsRail() and "STEP %d" or "Step %d", peek.step))
     peekBar.state:SetText(peek.step < cur and "done" or "coming up")
     peekBar.back.tip = strformat("Back to your step (%d)", cur)
     peekBar.back.tip2 = "Right-click either arrow does the same."
@@ -1060,8 +1355,10 @@ local function RenderPeek(guide, cur)
     peekBar.go:SetWidth(max(52, floor(peekBar.go.t:GetStringWidth() + 14)))
     PlaceFrame(peekBar, PAD, 20)
     y = y + 7
-    AddTextRow(title:upper(), {font = HEAD_FONT, size = 10, color = C.accent, stripe = C.accent, gap = 3})
+    RailMark()
+    StepHeader(title, "viewing")
     RenderElements(step, true)
+    RailEnd()
     y = y + 5
 end
 
@@ -1099,6 +1396,14 @@ local function AnchorTimers()
         bar:SetHeight(TIMER_H - 2)
         if bar.SetFrameStrata then bar:SetFrameStrata(strata) end
         if bar.SetFrameLevel then bar:SetFrameLevel(level) end
+        -- match the look: a gold Blizzard status bar, or the rail's blue
+        if IsRail() then
+            if bar.SetTexture then pcall(bar.SetTexture, bar, WHITE) end
+            if bar.SetColor then pcall(bar.SetColor, bar, C.link[1], C.link[2], C.link[3], 0.85) end
+        else
+            if bar.SetTexture then pcall(bar.SetTexture, bar, "Interface\\TargetingFrame\\UI-StatusBar") end
+            if bar.SetColor then pcall(bar.SetColor, bar, 1, 0.70, 0.10, 1) end
+        end
     end
 end
 
@@ -1159,6 +1464,12 @@ local function RenderGuide()
     local cc = peek.step and C.link or C.muted
     guideTitle.counter:SetTextColor(cc[1], cc[2], cc[3])
     local th = 17 + ((guide.group and guide.group ~= "") and 13 or 0)
+    if IsRail() and total > 0 then
+        th = th + 8
+        guideTitle.prog:SetWidth(max(1, (innerW) * min(1, cur / total)))
+    end
+    Vis(guideTitle.progBG, IsRail() and total > 0)
+    Vis(guideTitle.prog, IsRail() and total > 0)
     PlaceFrame(guideTitle, PAD, th)
     y = y + 8
     RenderTimers()
@@ -1168,8 +1479,9 @@ local function RenderGuide()
         return
     end
 
-    -- Active steps
-    local shown = 0
+    -- Active steps (ongoing steps first, then yours). Waypoint Rail also
+    -- shows the step before and after yours, on the same route line.
+    local shown, ghostedPrev, lastNonSticky = 0, false, nil
     for _, step in ipairs(f.activeSteps or {}) do
         if StepVisible(step) then
             shown = shown + 1
@@ -1177,12 +1489,25 @@ local function RenderGuide()
             if not title or title == "" then
                 title = step.sticky and "Ongoing" or strformat("Step %d", step.index or 0)
             end
-            AddTextRow(title:upper(), {font = HEAD_FONT, size = 10, color = C.accent,
-                                       stripe = C.accent, gap = 3})
+            RailMark()
+            if IsRail() and not step.sticky and not ghostedPrev then
+                ghostedPrev = true
+                for i = (step.index or cur) - 1, 1, -1 do
+                    if StepHasText(guide.steps[i]) then GhostRow(guide.steps[i], -1, true); break end
+                end
+            end
+            StepHeader(title, step.sticky and "sticky" or "current")
             RenderElements(step, false)
+            if not step.sticky then lastNonSticky = step end
             y = y + 5
         end
     end
+    if IsRail() and lastNonSticky then
+        for i = (lastNonSticky.index or cur) + 1, total do
+            if StepHasText(guide.steps[i]) then GhostRow(guide.steps[i], 1, false); break end
+        end
+    end
+    RailEnd()
     if shown == 0 then
         AddTextRow("Waiting for the next step...", {color = C.muted, size = 12, gap = 6})
     end
@@ -1223,7 +1548,7 @@ local function RenderQuests()
         local lvl = q.level and q.level > 0 and
                         strformat("[%d%s] ", q.level, (tonumber(q.group) or 0) > 0 and "+" or "") or ""
         local r = AddTextRow(lvl .. q.title, {
-            font = HEAD_FONT, size = 11, color = {r1, g1, b1},
+            font = HEAD_FONT, size = IsRail() and 11 or 13, color = {r1, g1, b1},
             stripe = isLinked and C.guideTag or nil, gap = 1,
         })
         r.wMouse = true
@@ -1258,7 +1583,7 @@ local function RenderQuests()
             local text, _, finished = _G.GetQuestLogLeaderBoard(j, q.index)
             if text and text ~= "" then
                 local cur2, tot2 = ParseProgress(text)
-                AddTextRow(text, {
+                AddTextRow(IsRail() and text or ("- " .. text), {
                     x = PAD + INDENT, size = 12,
                     color = finished and C.muted or C.text,
                     progress = (cur2 and not finished) and {cur2, tot2} or nil,
@@ -1308,6 +1633,7 @@ local function RenderInner()
     rowsUsed = 0
     y = PAD
     renderGen = renderGen + 1
+    railTop = nil
 
     RenderGuide()
     if db.showQuests then
@@ -1315,7 +1641,7 @@ local function RenderInner()
         RenderQuests()
     end
     FinishRows()
-    for _, fr in ipairs({guideHeader, guideTitle, peekBar, timerSlot, questHeader}) do
+    for _, fr in ipairs({guideHeader, guideTitle, peekBar, timerSlot, questHeader, railLine}) do
         Vis(fr, fr.placedGen == renderGen)
     end
     AnchorTimers()
@@ -1410,7 +1736,7 @@ do
     local tint = setupOverlay:CreateTexture(nil, "BACKGROUND")
     tint:SetAllPoints(setupOverlay)
     tint:SetTexture(WHITE)
-    tint:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], 0.16)
+    tint:SetVertexColor(1, 0.82, 0, 0.06)
     local edges = {
         {"TOPLEFT", "TOPRIGHT", nil, 2}, {"BOTTOMLEFT", "BOTTOMRIGHT", nil, 2},
         {"TOPLEFT", "BOTTOMLEFT", 2, nil}, {"TOPRIGHT", "BOTTOMRIGHT", 2, nil},
@@ -1418,7 +1744,7 @@ do
     for _, e in ipairs(edges) do
         local t = setupOverlay:CreateTexture(nil, "BORDER")
         t:SetTexture(WHITE)
-        t:SetVertexColor(C.accent[1], C.accent[2], C.accent[3], 0.9)
+        t:SetVertexColor(1, 0.82, 0, 0.9)
         t:SetPoint(e[1], setupOverlay, e[1], 0, 0)
         t:SetPoint(e[2], setupOverlay, e[2], 0, 0)
         if e[3] then t:SetWidth(e[3]) else t:SetHeight(e[4]) end
@@ -1426,19 +1752,19 @@ do
 end
 local setupLabel = setupOverlay:CreateFontString(nil, "OVERLAY")
 SetFont(setupLabel, HEAD_FONT, 12, "OUTLINE")
-setupLabel:SetPoint("CENTER", setupOverlay, "CENTER", 0, 8)
+setupLabel:SetPoint("TOP", setupOverlay, "TOP", 0, -6)
 setupLabel:SetWidth(180)
 setupLabel:SetJustifyH("CENTER")
-setupLabel:SetTextColor(unpack(C.accent))
-setupLabel:SetText("SETUP\nDrag to move.\nDrag a bottom corner to resize.\nType /rxpq setup when done.")
+setupLabel:SetTextColor(1, 0.82, 0)
+setupLabel:SetText("Drag to move")
 local setupSize = setupOverlay:CreateFontString(nil, "OVERLAY")
 SetFont(setupSize, HEAD_FONT, 11, "OUTLINE")
 setupSize:SetPoint("BOTTOM", setupOverlay, "BOTTOM", 0, 8)
-setupSize:SetTextColor(unpack(C.text))
+setupSize:SetTextColor(1, 1, 1)
 setupSize:SetText("")
 
 local function ShowSetupSize()
-    setupSize:SetText(strformat("%d x %d", floor(panel:GetWidth() + 0.5), floor(panel:GetHeight() + 0.5)))
+    setupSize:SetText(strformat("%d x %d max", floor(panel:GetWidth() + 0.5), floor(panel:GetHeight() + 0.5)))
 end
 
 setupOverlay:SetScript("OnDragStart", function() panel:StartMoving() end)
@@ -1494,6 +1820,81 @@ panel:SetScript("OnSizeChanged", function()
     panel.dirty = true
 end)
 
+-- The setup window: sits to the left of the panel while you place it,
+-- size it and pick a look. The panel itself is the live preview.
+local setupWin = CreateFrame("Frame", "RXPQuestPanelSetup", UIParent, BackdropTemplate)
+setupWin:SetSize(230, 214)
+setupWin:SetFrameStrata("DIALOG")
+setupWin:SetClampedToScreen(true)
+setupWin:Hide()
+if setupWin.SetBackdrop then
+    setupWin:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 24,
+        insets = {left = 6, right = 6, top = 6, bottom = 6},
+    })
+end
+do
+    local function Text(font, size, r, g, b, yOff, msg)
+        local fs = setupWin:CreateFontString(nil, "OVERLAY")
+        SetFont(fs, font, size, "")
+        fs:SetPoint("TOPLEFT", setupWin, "TOPLEFT", 16, yOff)
+        fs:SetWidth(198)
+        fs:SetJustifyH("LEFT")
+        fs:SetTextColor(r, g, b)
+        fs:SetText(msg)
+        return fs
+    end
+    Text(HEAD_FONT, 14, 1, 0.82, 0, -16, "RXP Quest Panel setup")
+    Text(BODY_FONT, 12, 0.92, 0.92, 0.92, -38,
+         "1. Drag the panel where you want it.\n" ..
+         "2. Drag a bottom corner to set the most room it can take.\n" ..
+         "3. Pick a look:")
+    setupWin.sizeText = Text(BODY_FONT, 11, 0.62, 0.62, 0.62, -152, "")
+end
+local SetStyle   -- defined below
+local function NewSetupButton(label, w)
+    local b = CreateFrame("Button", nil, setupWin)
+    b:SetSize(w, 22)
+    b.bg = b:CreateTexture(nil, "BACKGROUND")
+    b.bg:SetAllPoints(b)
+    b.bg:SetTexture("Interface\\Buttons\\UI-Panel-Button-Up")
+    b.bg:SetTexCoord(0, 0.625, 0, 0.6875)
+    b.hl = b:CreateTexture(nil, "HIGHLIGHT")
+    b.hl:SetAllPoints(b)
+    b.hl:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
+    b.hl:SetTexCoord(0, 0.625, 0, 0.6875)
+    b.hl:SetBlendMode("ADD")
+    b.t = b:CreateFontString(nil, "OVERLAY")
+    SetFont(b.t, HEAD_FONT, 11, "")
+    b.t:SetPoint("CENTER", 0, 0)
+    b.t:SetTextColor(1, 0.82, 0)
+    b.t:SetText(label)
+    b.SetChosen = function(self, on)
+        self.t:SetText((on and "> " or "") .. label .. (on and " <" or ""))
+        if on then self.t:SetTextColor(1, 1, 1) else self.t:SetTextColor(1, 0.82, 0) end
+    end
+    return b
+end
+setupWin.blizzard = NewSetupButton("Blizzard Native", 198)
+setupWin.blizzard:SetPoint("TOPLEFT", setupWin, "TOPLEFT", 16, -96)
+setupWin.blizzard:SetScript("OnClick", function() SetStyle("blizzard") end)
+setupWin.rail = NewSetupButton("Waypoint Rail", 198)
+setupWin.rail:SetPoint("TOPLEFT", setupWin.blizzard, "BOTTOMLEFT", 0, -4)
+setupWin.rail:SetScript("OnClick", function() SetStyle("rail") end)
+setupWin.done = NewSetupButton("Done", 90)
+setupWin.done:SetPoint("BOTTOMRIGHT", setupWin, "BOTTOMRIGHT", -14, 14)
+
+local function UpdateSetupWin()
+    setupWin.blizzard:SetChosen(style == "blizzard")
+    setupWin.rail:SetChosen(style == "rail")
+    setupWin.sizeText:SetText(strformat("Most room: %d x %d. The box only draws as tall as what's in it.",
+                                        db.width or 0, db.boxHeight or 0))
+    setupWin:ClearAllPoints()
+    setupWin:SetPoint("TOPRIGHT", panel, "TOPLEFT", -12, 0)
+end
+
 local function SetSetupMode(on)
     panel.setup = on and true or false
     if on then
@@ -1502,14 +1903,35 @@ local function SetSetupMode(on)
         end
         setupOverlay:Show()
         ShowSetupSize()
+        UpdateSetupWin()
+        setupWin:Show()
     else
         StopSizing()
         setupOverlay:Hide()
+        setupWin:Hide()
         PinTopRight()
         db.locked = true
+        db.setupDone = true
     end
     panel.dirty = true
 end
+
+SetStyle = function(name)
+    if not PALETTES[name] then return false end
+    db.style = name
+    ApplyTheme()
+    if panel.setup == true then UpdateSetupWin() end
+    panel.dirty = true
+    panel.ghostDirty = true
+    return true
+end
+
+local function FinishSetup()
+    SetSetupMode(false)
+    Print("setup saved: %s look, %d wide, up to %d tall. /rxpq setup changes it later.",
+          STYLE_NAMES[style], db.width, db.boxHeight or 0)
+end
+setupWin.done:SetScript("OnClick", FinishSetup)
 
 ---------------------------------------------------------------------------
 -- Enable / disable
@@ -1638,15 +2060,21 @@ driver:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_LOGIN" then
         HookRXP()
         RestorePosition()
+        ApplyTheme()
         Apply()
         -- The addon used to be called RXPUnified; two copies would fight over RXP's window.
         local isLoaded = (_G.C_AddOns and _G.C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
         if isLoaded and isLoaded("RXPUnified") then
             Print("the old RXPUnified addon is also loaded. Delete its folder from Interface\\AddOns and /reload.")
         end
-        if db.enabled and not db.setupHinted then
-            db.setupHinted = true
-            Print("tip: type /rxpq setup to size and place this panel once.")
+        -- First time: walk through place, size and look, with the panel as a live preview.
+        if db.enabled and not db.setupDone then
+            _G.C_Timer.After(2, function()
+                if db.enabled and not db.setupDone and panel.setup ~= true then
+                    SetSetupMode(true)
+                    Print("welcome! Place the panel, set its size and pick a look, then press Done.")
+                end
+            end)
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
         _G.C_Timer.After(6, WarnIfRXPPaused)
@@ -1672,7 +2100,8 @@ end)
 local function Help()
     Print("commands:")
     Print("  /rxpq toggle - switch between this panel and the stock RXP window")
-    Print("  /rxpq setup - place the box and set its largest size (drag to move, drag a bottom corner); again to finish")
+    Print("  /rxpq setup - place the box, set its largest size and pick a look")
+    Print("  /rxpq style [blizzard|rail] - switch between the Blizzard Native and Waypoint Rail looks")
     Print("  /rxpq auto - clear the size you set in setup")
     Print("  /rxpq lock - lock or unlock dragging (drag the GUIDE/QUESTS headers)")
     Print("  /rxpq reset - put the panel back in its default spot")
@@ -1687,7 +2116,8 @@ local function Debug()
     local R, f = RXP(), RXPFrame()
     local build, _, _, toc = "?", nil, nil, "?"
     if _G.GetBuildInfo then build, _, _, toc = _G.GetBuildInfo() end
-    Print("client %s, interface %s, enabled=%s", tostring(build), tostring(toc), tostring(db.enabled))
+    Print("client %s, interface %s, enabled=%s, look=%s, setupDone=%s", tostring(build), tostring(toc),
+          tostring(db.enabled), tostring(style), tostring(db.setupDone))
     local okName, gname = pcall(function()
         local g = R and R.currentGuide
         return g and (g.displayname or g.name) or "none"
@@ -1732,12 +2162,20 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
         if not db.enabled then
             Print("the panel is off. Type /rxpq toggle first.")
         elseif panel.setup then
-            SetSetupMode(false)
-            Print("saved: %d wide, up to %d tall, and locked. The box only draws as tall as its content.",
-                  db.width, db.boxHeight or 0)
+            FinishSetup()
         else
             SetSetupMode(true)
-            Print("setup: drag the box to move it, drag a bottom corner to set its largest size. Type /rxpq setup when done.")
+            Print("setup: drag the box to move it, drag a bottom corner to set its largest size, pick a look, then press Done.")
+        end
+    elseif cmd == "style" then
+        local want = arg
+        if want == "" then want = (style == "rail") and "blizzard" or "rail" end
+        if want == "native" or want == "blizz" then want = "blizzard" end
+        if want == "waypoint" then want = "rail" end
+        if SetStyle(want) then
+            Print("look: %s.", STYLE_NAMES[style])
+        else
+            Print("unknown look. Use /rxpq style blizzard or /rxpq style rail.")
         end
     elseif cmd == "auto" then
         db.boxHeight = nil
@@ -1777,7 +2215,8 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
     elseif cmd == "debug" then
         Debug()
     elseif cmd == "alpha" and num then
-        db.bgAlpha = max(0, min(1, num)); ApplyLook()
+        if IsRail() then db.bgAlpha = max(0, min(1, num)) else db.blizzShade = max(0, min(1, num)) end
+        ApplyLook()
     else
         Help()
     end

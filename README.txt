@@ -1,4 +1,4 @@
-RXP Quest Panel 0.4.3
+RXP Quest Panel 0.5.0
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -13,24 +13,37 @@ Install
   4. Start WoW, and on the character screen click AddOns and make sure
      "RXP Quest Panel" is ticked (tick "Load out of date AddOns" if it's greyed out).
 
-First-time setup (do this once)
-  1. Type /rxpq setup. The panel gets a gold outline.
-  2. Drag anywhere on it to move it.
-  3. Drag either bottom corner to set its largest size. The size shows at the bottom.
-  4. Type /rxpq setup again. The size and spot are saved and the panel is locked.
+First-time setup
+  Setup opens by itself the first time you log in with the addon. The panel
+  gets a gold outline and a small setup window opens to its left.
+  1. Drag anywhere on the panel to move it.
+  2. Drag either bottom corner to set its largest size. The size shows at the bottom.
+  3. Pick a look: Blizzard Native or Waypoint Rail. The panel changes right away,
+     so you can see each one before you choose.
+  4. Press Done. The size, spot and look are saved and the panel is locked.
   The box then only draws as tall as what's in it, up to that size; when there's
-  more to show than fits, scroll inside it with the mouse wheel. Run /rxpq setup
-  again any time to change it.
+  more to show than fits, scroll inside it with the mouse wheel. Type /rxpq setup
+  any time to open setup again.
+
+Looks
+  Blizzard Native  matches the game's own quest log: gold headers with the +/-
+                   buttons, page-turn arrows, dashes for objectives and the
+                   classic orange progress bars. No box behind it by default.
+  Waypoint Rail    a dark panel with a thin line down the left: your current
+                   step is a ringed dot on the line, finished steps are faded,
+                   and the next step shows as a one-line preview.
 
 Commands
-  /rxpq setup    size and place the box (see above); run again to finish
+  /rxpq setup    place the box, set its largest size and pick a look (see above)
+  /rxpq style    switch looks; or /rxpq style blizzard, /rxpq style rail
   /rxpq auto     clear the size you set in setup
   /rxpq toggle   switch between this panel and the stock RXP window
   /rxpq lock     lock / unlock dragging (drag by the GUIDE or QUESTS header)
   /rxpq reset    move the panel back to its default spot
   /rxpq quests   show / hide the quest section
   /rxpq tracker  hide / show your old quest tracker
-  /rxpq scale <0.5-2>   /rxpq width <200-600>   /rxpq height <80-1400>   /rxpq alpha <0-1>
+  /rxpq scale <0.5-2>   /rxpq width <200-600>   /rxpq height <80-1400>
+  /rxpq alpha <0-1>     how dark the box behind the panel is (each look keeps its own)
   /rxpq debug    print what the panel sees (client, RXP, panel size/position,
                  which trackers it found, last error) - send this if anything looks off
 
@@ -127,3 +140,11 @@ Changes in 0.4.3
   - RestedXP's flight timer now shows inside the panel, right under the
     guide name, instead of floating where RXP's old window used to be.
     The space closes up again when you land.
+
+Changes in 0.5.0
+  - Two looks to pick from: Blizzard Native and Waypoint Rail. Switch any
+    time with /rxpq style.
+  - First-time setup: on first login a setup window opens beside the panel
+    to place it, set its largest size and pick a look, with the panel as a
+    live preview. Press Done to save. /rxpq setup opens it again. If you
+    already used an older version, it opens once after this update.
