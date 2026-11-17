@@ -196,4 +196,49 @@ assert(shown == "RXPQUESTPANEL_LINK" and data == "https://example.com/v", "own l
 local plain = rowFor(step.elements[1])
 assert(plain and rawget(plain, "onClick") == nil and not plain.__mouse, "plain text line has no click")
 print("link lines OK")
+-- v0.3.0: arrows peek at other steps; RestedXP's step never changes
+local steps = RXP.currentGuide.steps
+steps[17] = step
+steps[16] = {index=16, elements={{text="Fly to Thorium Point", tag="fly", completed=true},
+                                  {text="CLICK HERE for a video", textOnly=true, url="https://example.com/16"}}}
+steps[15] = {index=15, tip=true, elements={{text="tip"}}}
+steps[14] = {index=14, elements={{text="Turn in Hardened Shells", tag="turnin"}}}
+steps[18] = {index=18, elements={{text="Get the Kargath Flight Path", tag="fp"}}}
+local setCalls = {}
+RXP.SetStep = function(n) setCalls[#setCalls+1] = n end
+local function arrow(sym) return find(panel, function(c) local t = rawget(c, "t"); return c.__kind=="Button" and t and rawget(t, "__text") == sym end)[1] end
+local prev, nxt = arrow("<"), arrow(">")
+assert(prev and nxt, "arrow buttons")
+local function rowText(txt) return find(panel, function(c) local t = rawget(c, "text"); return type(t) == "table" and rawget(t, "__text") == txt and c.__shown end)[1] end
+prev.__scripts.OnClick(prev, "LeftButton")
+driver.__scripts.OnUpdate(driver, 2)
+assert(#setCalls == 0, "previous doesn't move RestedXP")
+assert(rowText("LOOKING AT STEP 16 (done)"), "peek bar shows step 16")
+local link16 = rowText("CLICK HERE for a video")
+assert(link16 and rawget(link16, "onClick"), "links clickable while peeking")
+local shownUrl
+StaticPopupDialogs = {RXP_Link = {}}
+StaticPopup_Show = function() shownUrl = RXP.url end
+link16.__scripts.OnClick(link16, "LeftButton")
+assert(shownUrl == "https://example.com/16", "peek link opens RXP's box")
+prev.__scripts.OnClick(prev, "LeftButton")      -- skips tip step 15
+driver.__scripts.OnUpdate(driver, 2)
+assert(rowText("LOOKING AT STEP 14 (done)"), "skips steps with nothing to show")
+nxt.__scripts.OnClick(nxt, "LeftButton"); nxt.__scripts.OnClick(nxt, "LeftButton")  -- 16, then 17 = current
+driver.__scripts.OnUpdate(driver, 2)
+assert(not rowText("LOOKING AT STEP 16 (done)") and rowText("Run circles around The Shimmering Flats"), "back on the live view")
+nxt.__scripts.OnClick(nxt, "LeftButton")
+driver.__scripts.OnUpdate(driver, 2)
+assert(rowText("LOOKING AT STEP 18 (coming up)"), "next peeks ahead")
+local jump = rowText("Move RestedXP to this step")
+jump.__scripts.OnClick(jump, "LeftButton")
+assert(setCalls[1] == 18, "jump moves RestedXP on request")
+driver.__scripts.OnUpdate(driver, 2)
+assert(not rowText("LOOKING AT STEP 18 (coming up)"), "jump ends the peek")
+nxt.__scripts.OnClick(nxt, "LeftButton")
+nxt.__scripts.OnClick(nxt, "RightButton")
+driver.__scripts.OnUpdate(driver, 2)
+assert(not rowText("LOOKING AT STEP 18 (coming up)"), "right-click returns to current")
+assert(#setCalls == 1, "only the explicit jump touched RestedXP")
+print("peek OK")
 print("ALL OK")

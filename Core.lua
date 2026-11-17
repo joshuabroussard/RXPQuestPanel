@@ -430,6 +430,7 @@ end)
 local function NewNavButton(symbol, tip)
     local b = CreateFrame("Button", nil, guideTitle)
     b:SetSize(16, 16)
+    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b.t = b:CreateFontString(nil, "OVERLAY")
     SetFont(b.t, HEAD_FONT, 13, "")
     b.t:SetPoint("CENTER", 0, 1)
@@ -448,9 +449,9 @@ local function NewNavButton(symbol, tip)
     return b
 end
 
-local nextBtn = NewNavButton(">", "Next step")
+local nextBtn = NewNavButton(">", "Look at the next step\n|cff9aa0a8RestedXP stays on your step. Right-click: back to current.|r")
 nextBtn:SetPoint("TOPRIGHT", guideTitle, "TOPRIGHT", 2, 1)
-local prevBtn = NewNavButton("<", "Previous step")
+local prevBtn = NewNavButton("<", "Look at the previous step\n|cff9aa0a8RestedXP stays on your step. Right-click: back to current.|r")
 prevBtn:SetPoint("RIGHT", nextBtn, "LEFT", 0, 0)
 guideTitle.counter:SetPoint("RIGHT", prevBtn, "LEFT", -2, -1)
 
@@ -471,6 +472,9 @@ end
 
 local function ElementText(element)
     local t = element.text
+    if type(t) ~= "string" or t == "" or t == " " then
+        t = element.rawtext or element.tooltipText    -- steps RXP isn't showing right now
+    end
     if type(t) ~= "string" or t == "" or t == " " then return nil end
     local R = RXP()
     if R then
@@ -874,6 +878,106 @@ local function RenderHeader(header, collapsed, rightText)
     y = y + 4
 end
 
+---------------------------------------------------------------------------
+-- Peek: the < > arrows only change which step the panel shows. RestedXP
+-- stays on your real step, so a step you're standing in can't auto-complete
+-- and bounce you forward again.
+---------------------------------------------------------------------------
+local peek = {step = nil, guide = nil}
+
+local function StepHasText(step)
+    if not step or step.tip or step.hidewindow then return false end
+    for _, element in ipairs(step.elements or {}) do
+        if ElementText(element) then return true end
+    end
+    return false
+end
+
+local function StopPeek()
+    peek.step, peek.guide = nil, nil
+    panel.dirty = true
+end
+
+-- Move the view one step back (dir -1) or forward (dir 1), skipping steps
+-- with nothing to show. Landing on your current step ends the peek.
+local function PeekMove(dir)
+    local R = RXP()
+    local guide = R and R.currentGuide
+    if not (guide and guide.steps) then return end
+    local cur = CurrentStepNumber()
+    local n = (peek.guide == guide and peek.step) or cur
+    repeat
+        n = n + dir
+    until n < 1 or n > #guide.steps or n == cur or StepHasText(guide.steps[n])
+    if n < 1 or n > #guide.steps then return end
+    if n == cur then
+        StopPeek()
+    else
+        peek.step, peek.guide = n, guide
+        panel.dirty = true
+    end
+end
+
+local function RenderElements(step, peeking)
+    for _, element in ipairs(step.elements or {}) do
+        local text = ElementText(element)
+        if text then
+            local isDone = (element.completed or element.skip) and true or false
+            if peeking and step.index and step.index < CurrentStepNumber() then isDone = true end
+            local r
+            local clickable = element.textOnly and (element.url or element.next) and true or false
+            if element.textOnly then
+                r = AddTextRow(text, {x = PAD + 2, size = 12,
+                                      color = clickable and C.link or C.text, gap = 3})
+            else
+                local cur2, tot2 = ParseProgress(text)
+                r = AddTextRow(text, {
+                    x = PAD + 2, size = 12,
+                    color = isDone and C.muted or C.text,
+                    check = isDone,
+                    progress = cur2 and {cur2, tot2} or nil,
+                    gap = 3,
+                })
+                if not peeking then r.onCheck = ToggleElement end
+            end
+            r.element = element
+            if type(element.tooltip) == "string" then
+                r.wMouse = true
+                r.onEnter = ElementTooltip
+            end
+            if clickable then
+                r.wMouse = true
+                r.onClick = ElementClick
+            end
+        end
+    end
+end
+
+local function RenderPeek(guide, cur)
+    local step = guide.steps[peek.step]
+    local title = step.title
+    if not title or title == "" then
+        title = step.sticky and "Ongoing" or strformat("Step %d", step.index or peek.step)
+    end
+    local when = peek.step < cur and "done" or "coming up"
+    AddTextRow(strformat("LOOKING AT STEP %d (%s)", peek.step, when),
+               {font = HEAD_FONT, size = 10, color = C.link, stripe = C.link, gap = 3})
+    local back = AddTextRow(strformat("Back to your step (%d)", cur), {x = PAD + 2, size = 12, color = C.link, gap = 3})
+    back.wMouse = true
+    back.onClick = StopPeek
+    local jump = AddTextRow("Move RestedXP to this step", {x = PAD + 2, size = 11, color = C.muted, gap = 6})
+    jump.wMouse = true
+    jump.onClick = function()
+        local R = RXP()
+        local n = peek.step
+        StopPeek()
+        if R and R.SetStep and n then pcall(R.SetStep, n) end
+    end
+    AddTextRow(title:upper(), {font = HEAD_FONT, size = 10, color = C.accent, stripe = C.accent, gap = 3})
+    RenderElements(step, true)
+    y = y + 5
+end
+
 local function RenderGuide()
     local f = RXPFrame()
     local R = RXP()
@@ -905,10 +1009,21 @@ local function RenderGuide()
     guideTitle.group:SetText(guide.group or "")
     local cur = CurrentStepNumber()
     local total = guide.steps and #guide.steps or 0
-    guideTitle.counter:SetText(total > 0 and strformat("%d/%d", cur, total) or "")
+    if peek.step and (peek.guide ~= guide or peek.step == cur or peek.step < 1 or peek.step > total) then
+        peek.step, peek.guide = nil, nil       -- guide changed, or you caught up
+    end
+    local shownN = peek.step or cur
+    guideTitle.counter:SetText(total > 0 and strformat("%d/%d", shownN, total) or "")
+    local cc = peek.step and C.link or C.muted
+    guideTitle.counter:SetTextColor(cc[1], cc[2], cc[3])
     local th = 17 + ((guide.group and guide.group ~= "") and 13 or 0)
     PlaceFrame(guideTitle, PAD, th)
     y = y + 8
+
+    if peek.step then
+        RenderPeek(guide, cur)
+        return
+    end
 
     -- Active steps
     local shown = 0
@@ -921,37 +1036,7 @@ local function RenderGuide()
             end
             AddTextRow(title:upper(), {font = HEAD_FONT, size = 10, color = C.accent,
                                        stripe = C.accent, gap = 3})
-            for _, element in ipairs(step.elements or {}) do
-                local text = ElementText(element)
-                if text then
-                    local isDone = (element.completed or element.skip) and true or false
-                    local r
-                    local clickable = element.textOnly and (element.url or element.next) and true or false
-                    if element.textOnly then
-                        r = AddTextRow(text, {x = PAD + 2, size = 12,
-                                              color = clickable and C.link or C.text, gap = 3})
-                    else
-                        local cur2, tot2 = ParseProgress(text)
-                        r = AddTextRow(text, {
-                            x = PAD + 2, size = 12,
-                            color = isDone and C.muted or C.text,
-                            check = isDone,
-                            progress = cur2 and {cur2, tot2} or nil,
-                            gap = 3,
-                        })
-                        r.onCheck = ToggleElement
-                    end
-                    r.element = element
-                    if type(element.tooltip) == "string" then
-                        r.wMouse = true
-                        r.onEnter = ElementTooltip
-                    end
-                    if clickable then
-                        r.wMouse = true
-                        r.onClick = ElementClick
-                    end
-                end
-            end
+            RenderElements(step, false)
             y = y + 5
         end
     end
@@ -1130,21 +1215,11 @@ guideTitle:SetScript("OnClick", function(_, button)
         if f and f.DropDownMenu then f.DropDownMenu() end
     end
 end)
-nextBtn:SetScript("OnClick", function()
-    local R = RXP()
-    if R and R.SetStep and R.currentGuide then
-        local n = CurrentStepNumber() + 1
-        if R.currentGuide.steps and n <= #R.currentGuide.steps then pcall(R.SetStep, n) end
-    end
-    panel.dirty = true
+nextBtn:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then StopPeek() else PeekMove(1) end
 end)
-prevBtn:SetScript("OnClick", function()
-    local R = RXP()
-    if R and R.SetStep and R.currentGuide then
-        local n = CurrentStepNumber() - 1
-        if n >= 1 then pcall(R.SetStep, n) end
-    end
-    panel.dirty = true
+prevBtn:SetScript("OnClick", function(_, button)
+    if button == "RightButton" then StopPeek() else PeekMove(-1) end
 end)
 
 ---------------------------------------------------------------------------

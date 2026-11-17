@@ -1,4 +1,4 @@
-RXP Quest Panel 0.2.1
+RXP Quest Panel 0.3.0
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -93,3 +93,12 @@ Changes in 0.2.1
     so you can press Ctrl+C and paste it into your browser.
   - Link lines are shown in blue so you can tell they're clickable.
   - "Click here for the next guide" lines work the same way as in RXP's window.
+
+Changes in 0.3.0
+  - The < and > arrows now only change what the panel shows. RestedXP stays
+    on your step, so a step can't auto-complete and bounce you back.
+  - While you're looking at another step, a blue bar says which step it is.
+    Click "Back to your step" or right-click an arrow to return.
+  - "Move RestedXP to this step" moves RestedXP there for real.
+  - Steps that are only tips are skipped while looking around.
+  - Link lines work on any step you're looking at.
