@@ -282,4 +282,28 @@ assert(RXPQuestPanelDB.allQuests == false and rowText("[45] Deadmire") and not r
 WATCHED = {}; IsQuestWatched = function(i) return WATCHED[i] and 1 or nil end; tick()
 assert(rowText("No quests tracked (3 in your log). Click to show them all."), "nothing tracked hint")
 print("tracking OK")
+-- v0.4.3: RestedXP's flight timer bar moves into the panel under the guide name
+SlashCmdList.RXPQUESTPANEL("allquests")
+local bc = CreateFrame("Frame", nil, RXPFrame)
+local bar = CreateFrame("Frame", nil, UIParent)
+local anchoredTo
+rawset(bar, "SetPoint", function(self, pt, rel) anchoredTo = rel end)
+rawset(bar, "exp", 999)
+rawset(bc, "bars", {Kargath = bar})
+rawset(RXPFrame, "BarContainer", bc)
+local sorted = 0
+RXP.SortTimers = function() sorted = sorted + 1; anchoredTo = "rxp spot" end
+RXPFrame.BarContainer = bc
+local function slot() return find(panel, function(c) return c.__kind == "Frame" and c.placedGen and c.pH == 16 and c.__shown end)[1] end
+driver.__scripts.OnUpdate(driver, 2)
+local ts = slot()
+assert(ts and anchoredTo == ts, "timer bar sits in the panel")
+-- RXP re-sorts (a new timer starts or one ends): our hook puts it back
+-- (hooks are installed at login, so call the hooked function the way RXP would)
+RXP:SortTimers()
+assert(sorted == 1, "RXP's own sort still runs")
+bar.__shown = false
+driver.__scripts.OnUpdate(driver, 2)
+assert(not slot(), "no gap left once the flight ends")
+print("flight timer OK")
 print("ALL OK")

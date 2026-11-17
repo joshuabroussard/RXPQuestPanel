@@ -1,4 +1,4 @@
-RXP Quest Panel 0.4.2
+RXP Quest Panel 0.4.3
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -122,3 +122,8 @@ Changes in 0.4.2
     a fixed size. The box only draws as tall as what's in it (for example
     with QUESTS collapsed), growing down from the top, and scrolls once it
     reaches that size. The full box only shows while you're in setup.
+
+Changes in 0.4.3
+  - RestedXP's flight timer now shows inside the panel, right under the
+    guide name, instead of floating where RXP's old window used to be.
+    The space closes up again when you land.

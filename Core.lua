@@ -513,6 +513,7 @@ peekBar.back:SetPoint("RIGHT", peekBar, "RIGHT", -3, 0)
 peekBar.go = NewPillButton(peekBar, "Go here")
 peekBar.go:SetPoint("RIGHT", peekBar.back, "LEFT", -4, 0)
 peekBar.go.tip = "Move RestedXP to this step"
+
 peekBar.go.tip2 = "RestedXP's guide and arrow continue from here."
 
 ---------------------------------------------------------------------------
@@ -1064,6 +1065,50 @@ local function RenderPeek(guide, cur)
     y = y + 5
 end
 
+-- Slot for RestedXP's timer bars (the flight timer). RXP draws them where its
+-- own window would be; we move them into the panel, under the guide name.
+local TIMER_H = 16
+local timerSlot = CreateFrame("Frame", nil, content)
+
+local function ShownTimerBars()
+    local f = RXPFrame()
+    local bc = f and f.BarContainer
+    if type(bc) ~= "table" or type(bc.bars) ~= "table" then return nil, nil end
+    local list = {}
+    for _, bar in pairs(bc.bars) do
+        if type(bar) == "table" and bar.IsShown and bar:IsShown() then list[#list + 1] = bar end
+    end
+    table.sort(list, function(a, b) return (a.exp or 0) > (b.exp or 0) end)
+    return bc, list
+end
+
+-- Put the bars into the slot. Safe to call any time; does nothing when the
+-- slot isn't part of the current layout.
+local function AnchorTimers()
+    if not (db and db.enabled) or timerSlot.placedGen ~= renderGen or not timerSlot:IsShown() then return end
+    local bc, bars = ShownTimerBars()
+    if not bc then return end
+    bc:ClearAllPoints()
+    bc:SetPoint("TOPLEFT", timerSlot, "TOPLEFT", 0, 0)
+    bc:SetPoint("BOTTOMRIGHT", timerSlot, "BOTTOMRIGHT", 0, 0)
+    local strata, level = panel:GetFrameStrata(), (panel:GetFrameLevel() or 1) + 20
+    for i, bar in ipairs(bars) do
+        bar:ClearAllPoints()
+        bar:SetPoint("TOPLEFT", timerSlot, "TOPLEFT", 0, -(i - 1) * TIMER_H)
+        bar:SetPoint("TOPRIGHT", timerSlot, "TOPRIGHT", 0, -(i - 1) * TIMER_H)
+        bar:SetHeight(TIMER_H - 2)
+        if bar.SetFrameStrata then bar:SetFrameStrata(strata) end
+        if bar.SetFrameLevel then bar:SetFrameLevel(level) end
+    end
+end
+
+local function RenderTimers()
+    local _, bars = ShownTimerBars()
+    if not bars or #bars == 0 then return end
+    PlaceFrame(timerSlot, PAD, #bars * TIMER_H)
+    y = y + 6
+end
+
 peekBar.back:SetScript("OnClick", function() StopPeek() end)
 peekBar.go:SetScript("OnClick", function()
     local R = RXP()
@@ -1077,7 +1122,10 @@ local function RenderGuide()
     local R = RXP()
     local guide = R and R.currentGuide
     RenderHeader(guideHeader, db.collapseGuide)
-    if db.collapseGuide then return end
+    if db.collapseGuide then
+        RenderTimers()
+        return
+    end
 
     if not f or not guide or guide.empty then
         AddTextRow("No guide loaded. Right-click here to pick one.", {color = C.muted, size = 12, gap = 6})
@@ -1113,6 +1161,7 @@ local function RenderGuide()
     local th = 17 + ((guide.group and guide.group ~= "") and 13 or 0)
     PlaceFrame(guideTitle, PAD, th)
     y = y + 8
+    RenderTimers()
 
     if peek.step then
         RenderPeek(guide, cur)
@@ -1266,9 +1315,10 @@ local function RenderInner()
         RenderQuests()
     end
     FinishRows()
-    for _, fr in ipairs({guideHeader, guideTitle, peekBar, questHeader}) do
+    for _, fr in ipairs({guideHeader, guideTitle, peekBar, timerSlot, questHeader}) do
         Vis(fr, fr.placedGen == renderGen)
     end
+    AnchorTimers()
 
     local contentH = y + PAD - 4
     content:SetHeight(contentH)
@@ -1519,6 +1569,14 @@ local function HookRXP()
         hooksecurefunc(f.BottomFrame, "UpdateFrame", MarkDirty)
     end
     if type(R.LoadGuide) == "function" then hooksecurefunc(R, "LoadGuide", MarkDirty) end
+    -- RXP re-anchors its timer bars whenever one starts or ends: move them back
+    -- into the panel straight away, and make room for them on the next redraw.
+    if type(R.SortTimers) == "function" then
+        hooksecurefunc(R, "SortTimers", function()
+            MarkDirty()
+            AnchorTimers()
+        end)
+    end
     -- RXP's own show/hide toggle: follow it
     f:HookScript("OnShow", MarkDirty)
     f:HookScript("OnHide", MarkDirty)
