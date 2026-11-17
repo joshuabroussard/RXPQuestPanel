@@ -340,4 +340,59 @@ SlashCmdList.RXPQUESTPANEL("alpha 0.4")
 assert(RXPQuestPanelDB.blizzShade == 0.4, "alpha sets the Blizzard shade")
 for _, m in ipairs(chat) do assert(not tostring(m):find("drawing error"), "no drawing error after a look switch: " .. tostring(m)) end
 print("look switch OK")
+-- Right-click menus
+local function item(menu, text) for _, it in ipairs(menu.items) do if it.text == text then return it end end end
+assert(SETTINGS_CAT and SETTINGS_CAT.name == "RXP Quest Panel", "Options page registered with the modern settings panel")
+local qh = find(panel, function(c) local l = rawget(c, "label"); return l and rawget(l, "__text") == "QUESTS" end)[1]
+assert(qh, "quests header")
+rawset(panel, "lastDrag", -100)   -- no drag just happened
+LAST_MENU = nil
+qh.__scripts.OnClick(qh, "RightButton")
+assert(LAST_MENU and LAST_MENU.items[1].text == "RXP Quest Panel", "right-click on a header opens the panel menu")
+local look = item(LAST_MENU, "Look")
+item(look, "Waypoint Rail").setSel()
+assert(RXPQuestPanelDB.style == "rail" and item(look, "Waypoint Rail").isSel(), "menu switches the look")
+item(look, "Blizzard Native").setSel()
+assert(RXPQuestPanelDB.style == "blizzard", "menu switches back")
+local wasLocked = RXPQuestPanelDB.locked
+item(LAST_MENU, "Lock position").setSel()
+assert(RXPQuestPanelDB.locked == not wasLocked, "menu toggles the lock")
+item(LAST_MENU, "Lock position").setSel()
+SETTINGS_OPENED = nil
+item(LAST_MENU, "Options").func()
+assert(SETTINGS_OPENED == 77, "menu opens the Options page")
+local collapsed = RXPQuestPanelDB.collapseQuests
+assert(collapsed == RXPQuestPanelDB.collapseQuests, "right-click doesn't collapse")
+driver.__scripts.OnUpdate(driver, 2)
+local qrow = find(panel, function(c) return rawget(c, "questIndex") and rawget(c, "questTitle") and c.__shown end)[1]
+assert(qrow, "a quest line")
+LAST_MENU = nil
+qrow.__scripts.OnClick(qrow, "RightButton")
+assert(LAST_MENU and LAST_MENU.items[1].text == rawget(qrow, "questTitle"), "right-click on a quest opens the quest menu")
+assert(item(LAST_MENU, "Open in quest log") and not item(LAST_MENU, "Share with party"), "quest menu items (no share outside a group)")
+local trackItem = item(LAST_MENU, "Stop tracking") or item(LAST_MENU, "Track")
+local before = IsQuestWatched(rawget(qrow, "questIndex"))
+trackItem.func()
+assert(IsQuestWatched(rawget(qrow, "questIndex")) ~= before, "quest menu toggles tracking")
+trackItem.func()
+print("menus OK")
+-- Options page controls
+local opt = _G.RXPQuestPanelOptions
+rawget(opt, "locked").__scripts.OnClick(rawget(opt, "locked"))
+assert(RXPQuestPanelDB.locked == not wasLocked, "Options checkbox toggles the lock")
+rawget(opt, "locked").__scripts.OnClick(rawget(opt, "locked"))
+rawget(opt, "width").__scripts.OnValueChanged(rawget(opt, "width"), 403)
+assert(RXPQuestPanelDB.width == 400, "width slider snaps to its step and saves")
+rawget(opt, "shade").__scripts.OnValueChanged(rawget(opt, "shade"), 0.3)
+assert(math.abs(RXPQuestPanelDB.blizzShade - 0.3) < 1e-9, "shade slider sets the Blizzard shade")
+rawget(opt, "lookRail").__scripts.OnClick(rawget(opt, "lookRail"))
+assert(RXPQuestPanelDB.style == "rail", "Options look button")
+rawget(opt, "lookBlizzard").__scripts.OnClick(rawget(opt, "lookBlizzard"))
+opt:Show()
+SETTINGS_OPENED = nil
+SlashCmdList.RXPQUESTPANEL("options")
+assert(SETTINGS_OPENED == 77, "/rxpq options opens the page")
+assert(type(RXPQuestPanel_OnAddonCompartmentClick) == "function", "addon button handler")
+driver.__scripts.OnUpdate(driver, 2)
+print("options OK")
 print("ALL OK")

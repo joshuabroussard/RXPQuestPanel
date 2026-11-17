@@ -1,4 +1,4 @@
-RXP Quest Panel 0.5.1
+RXP Quest Panel 0.6.0
 =====================
 Hides the RestedXP Guides main window and redraws the current guide steps,
 plus your whole quest log, in one panel on the right side of the screen.
@@ -33,7 +33,18 @@ Looks
                    step is a ringed dot on the line and the step before it
                    is a faded line. The > arrow still looks ahead.
 
-Commands
+Menus and options
+  Right-click the GUIDE or QUESTS header: look, show all quests, show the quest
+  section, lock, setup, Options, or switch back to RestedXP's own window.
+  Right-click a quest: track or stop tracking, open in the quest log, show on
+  the map, share with your party (in a group), or abandon (the game asks first).
+  Options: Esc > Options > AddOns > RXP Quest Panel, the addon button by the
+  minimap, or /rxpq options. Checkboxes, the look, sliders for scale, width,
+  largest height and background shade, and buttons for setup, reset position
+  and clearing the size limit.
+
+Commands (the menus and Options cover all of these)
+  /rxpq options  open the Options page
   /rxpq setup    place the box, set its largest size and pick a look (see above)
   /rxpq style    switch looks; or /rxpq style blizzard, /rxpq style rail
   /rxpq auto     clear the size you set in setup
@@ -152,3 +163,12 @@ Changes in 0.5.0
 Changes in 0.5.1
   - Waypoint Rail no longer shows a one-line preview of the next step under
     the current one. Use the > arrow to look ahead.
+
+Changes in 0.6.0
+  - Right-click the GUIDE or QUESTS header for a menu with the look, quest
+    filters, lock, setup and Options.
+  - Right-click a quest to track it, open it, show it on the map, share it
+    or abandon it.
+  - New Options page under Esc > Options > AddOns, also opened from the
+    addon button by the minimap or /rxpq options. On clients without that
+    panel it opens as its own window. The slash commands still work.

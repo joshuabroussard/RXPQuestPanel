@@ -25,6 +25,7 @@ jobs:
         run: |
           luacheck --config tests/.luacheckrc --no-color Core.lua
           lua5.1 tests/run.lua tests Core.lua
+          lua5.1 tests/fallback.lua tests Core.lua
 
       - name: Build
         run: bash scripts/build.sh

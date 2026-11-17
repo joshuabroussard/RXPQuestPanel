@@ -28,6 +28,8 @@ local floor, max, min, ipairs, pairs, type, tonumber, tostring, pcall, select =
 local strformat = string.format
 
 local BackdropTemplate = _G.BackdropTemplateMixin and "BackdropTemplate" or nil
+local Menus = {}   -- right-click menus, filled in near the end of the file
+local RegisterOptions   -- the Options page, also near the end
 
 ---------------------------------------------------------------------------
 -- Look
@@ -421,6 +423,7 @@ local function AcquireRow()
         rowPool[rowsUsed] = r
     end
     r.onClick, r.onEnter, r.onCheck, r.element, r.questIndex = nil, nil, nil, nil, nil
+    r.questID, r.questTitle = nil, nil
     -- what this row should show; applied once at the end of the redraw
     r.wStripe, r.wCheck, r.wBarBG, r.wBar, r.wRight, r.wMouse = false, false, false, false, false, false
     r.wNode, r.wNodeBack, r.wPct, r.wEdge = false, false, false, false
@@ -1548,8 +1551,11 @@ local function RenderQuests()
         r.wMouse = true
         r.questIndex = q.index
         r.questID = q.id
-        r.onClick = function(self)
-            if _G.IsShiftKeyDown and _G.IsShiftKeyDown() then
+        r.questTitle = q.title
+        r.onClick = function(self, button)
+            if button == "RightButton" then
+                if Menus.quest then Menus.quest(self) end
+            elseif _G.IsShiftKeyDown and _G.IsShiftKeyDown() then
                 ToggleWatch(self.questIndex, self.questID)
                 panel.dirty = true
             else
@@ -1562,6 +1568,7 @@ local function RenderQuests()
             if isLinked then GameTooltip:AddLine("Used by your current guide step", unpack(C.guideTag)) end
             GameTooltip:AddLine("Click: open in quest log", 0.8, 0.8, 0.8)
             GameTooltip:AddLine(q.watched and "Shift-click: stop tracking" or "Shift-click: track", 0.8, 0.8, 0.8)
+            GameTooltip:AddLine("Right-click: more (share, map, abandon)", 0.8, 0.8, 0.8)
             GameTooltip:Show()
         end
 
@@ -1695,6 +1702,8 @@ local function HeaderClick(self, button)
     if button == "LeftButton" then
         self.toggle()
         panel.dirty = true
+    elseif button == "RightButton" and Menus.panel then
+        Menus.panel(self)
     end
 end
 
@@ -2055,6 +2064,7 @@ driver:SetScript("OnEvent", function(_, event, arg1)
         HookRXP()
         RestorePosition()
         ApplyTheme()
+        pcall(RegisterOptions)
         Apply()
         -- The addon used to be called RXPUnified; two copies would fight over RXP's window.
         local isLoaded = (_G.C_AddOns and _G.C_AddOns.IsAddOnLoaded) or _G.IsAddOnLoaded
@@ -2091,9 +2101,456 @@ end)
 ---------------------------------------------------------------------------
 -- Slash commands
 ---------------------------------------------------------------------------
+---------------------------------------------------------------------------
+-- Actions shared by the right-click menus, the Options page and /rxpq
+---------------------------------------------------------------------------
+local Actions = {}
+local RefreshOptions   -- defined with the Options page below
+
+local function Changed()
+    MarkDirty()
+    if RefreshOptions then RefreshOptions() end
+end
+
+function Actions.SetEnabled(on)
+    db.enabled = on and true or false
+    if panel.setup == true and not db.enabled then SetSetupMode(false) end
+    Apply()
+    if RefreshOptions then RefreshOptions() end
+end
+function Actions.SetLocked(on) db.locked = on and true or false; Changed() end
+function Actions.SetShowQuests(on) db.showQuests = on and true or false; Changed() end
+function Actions.SetAllQuests(on) db.allQuests = on and true or false; Changed() end
+function Actions.SetHideTracker(on)
+    db.hideOtherTrackers = on and true or false
+    if db.hideOtherTrackers then HideOtherTrackers() else RestoreOtherTrackers() end
+    Changed()
+end
+function Actions.SetScale(v) db.scale = max(0.5, min(2, v)); ApplyLook(); Changed() end
+function Actions.SetWidth(v) db.width = max(200, min(600, floor(v + 0.5))); ApplyLook(); Changed() end
+function Actions.GetHeight() return db.boxHeight or db.maxHeight end
+function Actions.SetHeight(v)
+    if db.boxHeight then
+        db.boxHeight = max(80, min(1400, floor(v + 0.5)))
+    else
+        db.maxHeight = max(150, min(1200, floor(v + 0.5)))
+    end
+    Changed()
+end
+function Actions.GetShade() if IsRail() then return db.bgAlpha or 0 end return db.blizzShade or 0 end
+function Actions.SetShade(v)
+    v = max(0, min(1, v))
+    if IsRail() then db.bgAlpha = v else db.blizzShade = v end
+    ApplyLook()
+    if RefreshOptions then RefreshOptions() end
+end
+function Actions.SetStyle(name)
+    local ok = SetStyle(name)
+    if ok and RefreshOptions then RefreshOptions() end
+    return ok
+end
+function Actions.ResetPosition() db.point = nil; RestorePosition() end
+function Actions.ClearSize() db.boxHeight = nil; Changed() end
+
+local function CloseOptionsWindow()
+    for _, name in ipairs({"SettingsPanel", "InterfaceOptionsFrame"}) do
+        local f = _G[name]
+        if type(f) == "table" and f.IsShown and f:IsShown() then
+            if f.Close then pcall(f.Close, f)
+            elseif _G.HideUIPanel then pcall(_G.HideUIPanel, f) else f:Hide() end
+        end
+    end
+end
+
+function Actions.OpenSetup()
+    if not db.enabled then Actions.SetEnabled(true) end
+    CloseOptionsWindow()
+    if panel.setup ~= true then
+        SetSetupMode(true)
+        Print("setup: drag the box to move it, drag a bottom corner to set its largest size, pick a look, then press Done.")
+    end
+end
+
+---------------------------------------------------------------------------
+-- Menus. A menu is a plain list of items:
+--   {title = "..."}, {divider = true}, {text, func}, {text, checked = fn, func} (checkbox),
+--   {text, radio = true, checked = fn, func}, {text, children = {...}} (submenu)
+-- It is drawn with the game's modern menus when they exist, the older dropdown
+-- menus otherwise, and as chat lines if neither is there.
+---------------------------------------------------------------------------
+local function ShowModernMenu(owner, items)
+    local function Build(desc, list)
+        for _, it in ipairs(list) do
+            if it.title then
+                desc:CreateTitle(it.title)
+            elseif it.divider then
+                desc:CreateDivider()
+            elseif it.children then
+                Build(desc:CreateButton(it.text), it.children)
+            elseif it.radio then
+                desc:CreateRadio(it.text, function() return it.checked() end, function() it.func() end)
+            elseif it.checked then
+                desc:CreateCheckbox(it.text, function() return it.checked() end, function() it.func() end)
+            else
+                desc:CreateButton(it.text, function() it.func() end)
+            end
+        end
+    end
+    _G.MenuUtil.CreateContextMenu(owner, function(_, root) Build(root, items) end)
+end
+
+local dropDown
+local function ShowOldMenu(items)
+    if not dropDown then
+        dropDown = CreateFrame("Frame", "RXPQuestPanelDropDown", UIParent, "UIDropDownMenuTemplate")
+    end
+    _G.UIDropDownMenu_Initialize(dropDown, function(_, level, menuList)
+        local list = menuList or items
+        for _, it in ipairs(list) do
+            local info = _G.UIDropDownMenu_CreateInfo()
+            if it.title then
+                info.text, info.isTitle, info.notCheckable = it.title, true, true
+            elseif it.divider then
+                info.text, info.disabled, info.notCheckable = "", true, true
+            else
+                info.text = it.text
+                if it.children then
+                    info.hasArrow, info.menuList, info.notCheckable = true, it.children, true
+                else
+                    info.func = function() it.func(); _G.CloseDropDownMenus() end
+                    if it.checked then
+                        info.checked = it.checked() and true or false
+                        info.isNotRadio = not it.radio
+                    else
+                        info.notCheckable = true
+                    end
+                end
+            end
+            _G.UIDropDownMenu_AddButton(info, level)
+        end
+    end, "MENU")
+    _G.ToggleDropDownMenu(1, nil, dropDown, "cursor", 0, 0)
+end
+
+local function ShowMenu(owner, items)
+    if type(_G.MenuUtil) == "table" and _G.MenuUtil.CreateContextMenu then
+        local ok = pcall(ShowModernMenu, owner, items)
+        if ok then return "modern" end
+    end
+    if _G.UIDropDownMenu_Initialize and _G.ToggleDropDownMenu and _G.UIDropDownMenu_CreateInfo then
+        local ok = pcall(ShowOldMenu, items)
+        if ok then return "old" end
+    end
+    Print("this client has no right-click menus; the same settings are in /rxpq.")
+    return "none"
+end
+Menus.Show = ShowMenu
+
+local OpenOptions   -- defined with the Options page below
+
+function Menus.BuildPanel()
+    return {
+        {title = "RXP Quest Panel"},
+        {text = "Look", children = {
+            {text = STYLE_NAMES.blizzard, radio = true, checked = function() return style == "blizzard" end,
+             func = function() Actions.SetStyle("blizzard") end},
+            {text = STYLE_NAMES.rail, radio = true, checked = function() return style == "rail" end,
+             func = function() Actions.SetStyle("rail") end},
+        }},
+        {text = "Show all quests", checked = function() return db.allQuests end,
+         func = function() Actions.SetAllQuests(not db.allQuests) end},
+        {text = "Show quest section", checked = function() return db.showQuests end,
+         func = function() Actions.SetShowQuests(not db.showQuests) end},
+        {text = "Lock position", checked = function() return db.locked end,
+         func = function() Actions.SetLocked(not db.locked) end},
+        {divider = true},
+        {text = "Setup (place, size, look)", func = Actions.OpenSetup},
+        {text = "Options", func = function() OpenOptions() end},
+        {text = "Use RestedXP's own window", func = function()
+            Actions.SetEnabled(false)
+            Print("off. RestedXP's own window is back. Turn the panel on again in Options or with /rxpq toggle.")
+        end},
+    }
+end
+
+function Menus.panel(owner)
+    return ShowMenu(owner, Menus.BuildPanel())
+end
+
+-- Quest actions: the modern quest functions when the client has them, the
+-- classic quest log ones otherwise. An item only shows when it can work.
+local QuestActions = {}
+function QuestActions.CanMap(questID)
+    return questID and type(_G.QuestMapFrame_OpenToQuestDetails) == "function"
+end
+function QuestActions.Map(questID) pcall(_G.QuestMapFrame_OpenToQuestDetails, questID) end
+function QuestActions.CanShare(index, questID)
+    local inGroup = (_G.IsInGroup and _G.IsInGroup()) or (_G.GetNumGroupMembers and (_G.GetNumGroupMembers() or 0) > 0)
+    if not inGroup then return false end
+    local CQ = _G.C_QuestLog
+    if questID and CQ and CQ.IsPushableQuest then
+        local ok, push = pcall(CQ.IsPushableQuest, questID)
+        return ok and push
+    end
+    if index and _G.SelectQuestLogEntry and _G.GetQuestLogPushable and _G.QuestLogPushQuest then
+        _G.SelectQuestLogEntry(index)
+        return _G.GetQuestLogPushable() and true or false
+    end
+    return false
+end
+function QuestActions.Share(index, questID)
+    local CQ = _G.C_QuestLog
+    if questID and type(_G.QuestMapQuestOptions_ShareQuest) == "function" then
+        pcall(_G.QuestMapQuestOptions_ShareQuest, questID)
+    elseif questID and CQ and CQ.SetSelectedQuest and _G.QuestLogPushQuest then
+        CQ.SetSelectedQuest(questID); pcall(_G.QuestLogPushQuest)
+    elseif index and _G.SelectQuestLogEntry and _G.QuestLogPushQuest then
+        _G.SelectQuestLogEntry(index); pcall(_G.QuestLogPushQuest)
+    end
+end
+function QuestActions.CanAbandon(index, questID)
+    local CQ = _G.C_QuestLog
+    if questID and type(_G.QuestMapQuestOptions_AbandonQuest) == "function" then return true end
+    if questID and CQ and CQ.SetSelectedQuest and CQ.SetAbandonQuest and _G.StaticPopup_Show then return true end
+    return index and _G.SelectQuestLogEntry and _G.SetAbandonQuest and _G.StaticPopup_Show and true or false
+end
+-- Every path ends at the game's own "abandon this quest?" popup.
+function QuestActions.Abandon(index, questID, title)
+    local CQ = _G.C_QuestLog
+    if questID and type(_G.QuestMapQuestOptions_AbandonQuest) == "function" then
+        pcall(_G.QuestMapQuestOptions_AbandonQuest, questID)
+    elseif questID and CQ and CQ.SetSelectedQuest and CQ.SetAbandonQuest then
+        CQ.SetSelectedQuest(questID); CQ.SetAbandonQuest()
+        pcall(_G.StaticPopup_Show, "ABANDON_QUEST", title or "")
+    elseif index and _G.SelectQuestLogEntry and _G.SetAbandonQuest then
+        _G.SelectQuestLogEntry(index); _G.SetAbandonQuest()
+        local name = _G.GetAbandonQuestName and _G.GetAbandonQuestName() or title or ""
+        pcall(_G.StaticPopup_Show, "ABANDON_QUEST", name)
+    end
+end
+Menus.QuestActions = QuestActions
+
+function Menus.BuildQuest(row)
+    local index, questID, title = row.questIndex, row.questID, row.questTitle
+    local items = {{title = title or "Quest"}}
+    items[#items + 1] = {text = IsWatched(index, questID) and "Stop tracking" or "Track",
+                         func = function() ToggleWatch(index, questID); panel.dirty = true end}
+    items[#items + 1] = {text = "Open in quest log", func = function() OpenQuestLog(index) end}
+    if QuestActions.CanMap(questID) then
+        items[#items + 1] = {text = "Show on map", func = function() QuestActions.Map(questID) end}
+    end
+    if QuestActions.CanShare(index, questID) then
+        items[#items + 1] = {text = "Share with party", func = function() QuestActions.Share(index, questID) end}
+    end
+    if QuestActions.CanAbandon(index, questID) then
+        items[#items + 1] = {divider = true}
+        items[#items + 1] = {text = "Abandon quest", func = function() QuestActions.Abandon(index, questID, title) end}
+    end
+    return items
+end
+
+function Menus.quest(row)
+    return ShowMenu(row, Menus.BuildQuest(row))
+end
+
+for _, h in ipairs({guideHeader, questHeader}) do
+    h:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("RXP Quest Panel", 1, 1, 1)
+        GameTooltip:AddLine("Click: collapse or expand", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Right-click: menu (look, quests, setup, options)", 0.8, 0.8, 0.8)
+        if not db.locked then GameTooltip:AddLine("Drag: move the panel", 0.8, 0.8, 0.8) end
+        GameTooltip:Show()
+    end)
+    h:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+---------------------------------------------------------------------------
+-- Options page: Esc > Options > AddOns > RXP Quest Panel. The same frame is
+-- used by the modern settings panel, the older AddOns panel, or on its own.
+---------------------------------------------------------------------------
+local opt = CreateFrame("Frame", "RXPQuestPanelOptions", UIParent, BackdropTemplate)
+opt.name = "RXP Quest Panel"
+opt:SetSize(420, 460)
+opt:Hide()
+opt.controls = {}
+opt.kind = "none"
+-- The modern settings panel calls these on its pages.
+opt.OnCommit = function() end
+opt.OnDefault = function() end
+opt.OnRefresh = function() if RefreshOptions then RefreshOptions() end end
+
+local function OptText(font, size, x, oy, msg, r, g, b)
+    local fs = opt:CreateFontString(nil, "OVERLAY")
+    SetFont(fs, font, size, "")
+    fs:SetPoint("TOPLEFT", opt, "TOPLEFT", x, oy)
+    fs:SetJustifyH("LEFT")
+    fs:SetTextColor(r or 1, g or 1, b or 1)
+    fs:SetText(msg)
+    return fs
+end
+
+OptText(HEAD_FONT, 16, 16, -16, "RXP Quest Panel", 1, 0.82, 0)
+OptText(BODY_FONT, 11, 16, -38, "Right-click the GUIDE or QUESTS header for these settings too.", 0.7, 0.7, 0.7)
+
+local function OptCheck(x, oy, label, get, set)
+    local cb = CreateFrame("CheckButton", nil, opt, "UICheckButtonTemplate")
+    cb:SetSize(24, 24)
+    cb:SetPoint("TOPLEFT", opt, "TOPLEFT", x, oy)
+    local t = opt:CreateFontString(nil, "OVERLAY")
+    SetFont(t, BODY_FONT, 12, "")
+    t:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    t:SetTextColor(1, 1, 1)
+    t:SetText(label)
+    cb:SetScript("OnClick", function() set(not get()) end)
+    cb.Refresh = function() cb:SetChecked(get() and true or false) end
+    cb.get, cb.set = get, set
+    opt.controls[#opt.controls + 1] = cb
+    return cb
+end
+
+local function OptSlider(x, oy, label, lo, hi, step, fmt, get, set)
+    local sl = CreateFrame("Slider", nil, opt, BackdropTemplate)
+    sl:SetPoint("TOPLEFT", opt, "TOPLEFT", x + 4, oy - 18)
+    sl:SetSize(180, 17)
+    sl:SetOrientation("HORIZONTAL")
+    sl:SetMinMaxValues(lo, hi)
+    sl:SetValueStep(step)
+    if sl.SetObeyStepOnDrag then sl:SetObeyStepOnDrag(true) end
+    if sl.SetBackdrop then
+        sl:SetBackdrop({
+            bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+            edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+            tile = true, tileSize = 8, edgeSize = 8,
+            insets = {left = 3, right = 3, top = 6, bottom = 6},
+        })
+    end
+    sl:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    local t = opt:CreateFontString(nil, "OVERLAY")
+    SetFont(t, BODY_FONT, 12, "")
+    t:SetPoint("TOPLEFT", opt, "TOPLEFT", x, oy)
+    t:SetTextColor(1, 0.82, 0)
+    local function Label(v) t:SetText(strformat("%s: " .. fmt, label, v)) end
+    sl:SetScript("OnValueChanged", function(_, v)
+        if sl.refreshing then return end
+        v = floor(v / step + 0.5) * step
+        set(v)
+        Label(get())
+    end)
+    sl.Refresh = function()
+        sl.refreshing = true
+        sl:SetValue(get())
+        sl.refreshing = false
+        Label(get())
+    end
+    sl.get, sl.set = get, set
+    opt.controls[#opt.controls + 1] = sl
+    return sl
+end
+
+local function OptButton(x, oy, w, label, func)
+    local b = CreateFrame("Button", nil, opt, "UIPanelButtonTemplate")
+    b:SetSize(w, 22)
+    b:SetPoint("TOPLEFT", opt, "TOPLEFT", x, oy)
+    b:SetText(label)
+    b:SetScript("OnClick", func)
+    opt.controls[#opt.controls + 1] = b
+    return b
+end
+
+opt.enabled = OptCheck(16, -62, "Show this panel (off: RestedXP's own window)",
+                       function() return db.enabled end, Actions.SetEnabled)
+opt.locked = OptCheck(16, -88, "Lock position", function() return db.locked end, Actions.SetLocked)
+opt.showQuests = OptCheck(16, -114, "Show the quest section", function() return db.showQuests end, Actions.SetShowQuests)
+opt.allQuests = OptCheck(16, -140, "Show all quests (off: only the ones you track)",
+                         function() return db.allQuests end, Actions.SetAllQuests)
+opt.hideTracker = OptCheck(16, -166, "Hide the game's own quest tracker",
+                           function() return db.hideOtherTrackers end, Actions.SetHideTracker)
+
+OptText(BODY_FONT, 12, 16, -202, "Look:", 1, 0.82, 0)
+opt.lookBlizzard = OptButton(60, -198, 150, STYLE_NAMES.blizzard, function() Actions.SetStyle("blizzard") end)
+opt.lookRail = OptButton(216, -198, 150, STYLE_NAMES.rail, function() Actions.SetStyle("rail") end)
+
+opt.scale = OptSlider(16, -236, "Scale", 0.5, 2, 0.05, "%.2f", function() return db.scale end, Actions.SetScale)
+opt.width = OptSlider(216, -236, "Width", 200, 600, 10, "%d", function() return db.width end, Actions.SetWidth)
+opt.height = OptSlider(16, -284, "Largest height", 80, 1400, 10, "%d", Actions.GetHeight, Actions.SetHeight)
+opt.shade = OptSlider(216, -284, "Background shade", 0, 1, 0.05, "%.2f", Actions.GetShade, Actions.SetShade)
+
+opt.setupBtn = OptButton(16, -336, 160, "Open setup", Actions.OpenSetup)
+opt.resetBtn = OptButton(184, -336, 120, "Reset position", Actions.ResetPosition)
+opt.clearBtn = OptButton(16, -364, 160, "Clear size limit", Actions.ClearSize)
+
+RefreshOptions = function()
+    if not db then return end
+    for _, c in ipairs(opt.controls) do
+        if c.Refresh then c.Refresh() end
+    end
+    local blizz = style == "blizzard"
+    opt.lookBlizzard:SetText((blizz and "> " or "") .. STYLE_NAMES.blizzard .. (blizz and " <" or ""))
+    opt.lookRail:SetText((not blizz and "> " or "") .. STYLE_NAMES.rail .. (not blizz and " <" or ""))
+end
+opt:SetScript("OnShow", function() RefreshOptions() end)
+
+RegisterOptions = function()
+    local S = _G.Settings
+    if type(S) == "table" and S.RegisterCanvasLayoutCategory and S.RegisterAddOnCategory then
+        local ok, category = pcall(S.RegisterCanvasLayoutCategory, opt, opt.name)
+        if ok and category then
+            pcall(S.RegisterAddOnCategory, category)
+            opt.category = category
+            opt.kind = "modern"
+            return
+        end
+    end
+    if _G.InterfaceOptions_AddCategory then
+        local ok = pcall(_G.InterfaceOptions_AddCategory, opt)
+        if ok then opt.kind = "classic"; return end
+    end
+    -- Neither panel exists: the page opens as a small window of its own.
+    opt.kind = "window"
+    opt:SetParent(UIParent)
+    opt:SetFrameStrata("DIALOG")
+    opt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    opt:SetMovable(true)
+    opt:EnableMouse(true)
+    opt:RegisterForDrag("LeftButton")
+    opt:SetScript("OnDragStart", opt.StartMoving)
+    opt:SetScript("OnDragStop", opt.StopMovingOrSizing)
+    if opt.SetBackdrop then
+        opt:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 24,
+            insets = {left = 6, right = 6, top = 6, bottom = 6},
+        })
+    end
+    local close = CreateFrame("Button", nil, opt, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", opt, "TOPRIGHT", -4, -4)
+    close:SetScript("OnClick", function() opt:Hide() end)
+    if _G.UISpecialFrames then table.insert(_G.UISpecialFrames, "RXPQuestPanelOptions") end
+end
+
+OpenOptions = function()
+    if opt.kind == "modern" then
+        local S, id = _G.Settings, opt.category
+        local catID = id and (id.GetID and id:GetID() or id.ID)
+        if not (catID and pcall(S.OpenToCategory, catID)) then pcall(S.OpenToCategory, opt.name) end
+    elseif opt.kind == "classic" and _G.InterfaceOptionsFrame_OpenToCategory then
+        -- The old panel needs two calls to land on the page the first time.
+        _G.InterfaceOptionsFrame_OpenToCategory(opt)
+        _G.InterfaceOptionsFrame_OpenToCategory(opt)
+    else
+        if opt:IsShown() then opt:Hide() else opt:Show() end
+    end
+end
+
+-- The game's addon button by the minimap (named in the .toc) opens Options.
+_G.RXPQuestPanel_OnAddonCompartmentClick = function() if db then OpenOptions() end end
+
 local function Help()
-    Print("commands:")
+    Print("right-click the GUIDE or QUESTS header for a menu, or type /rxpq options. Commands:")
     Print("  /rxpq toggle - switch between this panel and the stock RXP window")
+    Print("  /rxpq options - open the Options page")
     Print("  /rxpq setup - place the box, set its largest size and pick a look")
     Print("  /rxpq style [blizzard|rail] - switch between the Blizzard Native and Waypoint Rail looks")
     Print("  /rxpq auto - clear the size you set in setup")
@@ -2110,8 +2567,8 @@ local function Debug()
     local R, f = RXP(), RXPFrame()
     local build, _, _, toc = "?", nil, nil, "?"
     if _G.GetBuildInfo then build, _, _, toc = _G.GetBuildInfo() end
-    Print("client %s, interface %s, enabled=%s, look=%s, setupDone=%s", tostring(build), tostring(toc),
-          tostring(db.enabled), tostring(style), tostring(db.setupDone))
+    Print("client %s, interface %s, enabled=%s, look=%s, setupDone=%s, options=%s", tostring(build), tostring(toc),
+          tostring(db.enabled), tostring(style), tostring(db.setupDone), tostring(opt.kind))
     local okName, gname = pcall(function()
         local g = R and R.currentGuide
         return g and (g.displayname or g.name) or "none"
@@ -2144,9 +2601,7 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
     local cmd, arg = (msg or ""):lower():match("^%s*(%S*)%s*(.-)%s*$")
     local num = tonumber(arg)
     if cmd == "toggle" then
-        db.enabled = not db.enabled
-        if panel.setup and not db.enabled then SetSetupMode(false) end
-        Apply()
+        Actions.SetEnabled(not db.enabled)
         if db.enabled then
             Print("on. RXP's window is hidden and redrawn here.")
         else
@@ -2166,51 +2621,42 @@ _G.SlashCmdList.RXPQUESTPANEL = function(msg)
         if want == "" then want = (style == "rail") and "blizzard" or "rail" end
         if want == "native" or want == "blizz" then want = "blizzard" end
         if want == "waypoint" then want = "rail" end
-        if SetStyle(want) then
+        if Actions.SetStyle(want) then
             Print("look: %s.", STYLE_NAMES[style])
         else
             Print("unknown look. Use /rxpq style blizzard or /rxpq style rail.")
         end
+    elseif cmd == "options" or cmd == "config" then
+        OpenOptions()
     elseif cmd == "auto" then
-        db.boxHeight = nil
-        MarkDirty()
+        Actions.ClearSize()
         Print("size limit cleared: the box grows with its content up to %d tall.", db.maxHeight)
     elseif cmd == "lock" then
-        db.locked = not db.locked
+        Actions.SetLocked(not db.locked)
         Print(db.locked and "locked." or "unlocked: drag a section header to move.")
     elseif cmd == "reset" then
-        db.point = nil
-        RestorePosition()
+        Actions.ResetPosition()
         Print("position reset.")
     elseif cmd == "quests" then
-        db.showQuests = not db.showQuests
-        MarkDirty()
+        Actions.SetShowQuests(not db.showQuests)
         Print(db.showQuests and "quest section shown." or "quest section hidden.")
     elseif cmd == "allquests" then
-        db.allQuests = not db.allQuests
-        MarkDirty()
+        Actions.SetAllQuests(not db.allQuests)
         Print(db.allQuests and "showing every quest in your log."
               or "showing only the quests WoW is tracking (shift-click in the quest log).")
     elseif cmd == "tracker" then
-        db.hideOtherTrackers = not db.hideOtherTrackers
-        if db.hideOtherTrackers then HideOtherTrackers() else RestoreOtherTrackers() end
+        Actions.SetHideTracker(not db.hideOtherTrackers)
         Print(db.hideOtherTrackers and "old quest tracker hidden." or "old quest tracker allowed back (type /reload if it stays hidden).")
     elseif cmd == "scale" and num then
-        db.scale = max(0.5, min(2, num)); ApplyLook(); MarkDirty()
+        Actions.SetScale(num)
     elseif cmd == "width" and num then
-        db.width = max(200, min(600, floor(num))); ApplyLook(); MarkDirty()
+        Actions.SetWidth(num)
     elseif cmd == "height" and num then
-        if db.boxHeight then
-            db.boxHeight = max(80, min(1400, floor(num)))
-        else
-            db.maxHeight = max(150, min(1200, floor(num)))
-        end
-        MarkDirty()
+        Actions.SetHeight(num)
     elseif cmd == "debug" then
         Debug()
     elseif cmd == "alpha" and num then
-        if IsRail() then db.bgAlpha = max(0, min(1, num)) else db.blizzShade = max(0, min(1, num)) end
-        ApplyLook()
+        Actions.SetShade(num)
     else
         Help()
     end

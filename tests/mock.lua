@@ -103,4 +103,20 @@ RXP={currentGuide={displayname="34-35 Shimmering Flats", group="Dungeon Guide 30
   ActiveStepElementOnEnter=function(f) assert(f.element) end,
   settings={profile={hideGuideWindow=true}}, v2={IsGuideWindowEnabled=function() return false end}}
 for i=1,40 do RXP.currentGuide.steps[i]={} end
+-- Modern menus and settings, recorded so tests can inspect and press them
+local function MenuDesc(text, func)
+  local d = {text=text, func=func, items={}}
+  function d:CreateTitle(t) self.items[#self.items+1] = {kind="title", text=t} end
+  function d:CreateDivider() self.items[#self.items+1] = {kind="divider"} end
+  function d:CreateButton(t, f) local sub = MenuDesc(t, f); sub.kind="button"; self.items[#self.items+1] = sub; return sub end
+  function d:CreateCheckbox(t, isSel, setSel) self.items[#self.items+1] = {kind="checkbox", text=t, isSel=isSel, setSel=setSel} end
+  function d:CreateRadio(t, isSel, setSel) self.items[#self.items+1] = {kind="radio", text=t, isSel=isSel, setSel=setSel} end
+  return d
+end
+MenuUtil = {CreateContextMenu=function(owner, gen) local root = MenuDesc(); gen(owner, root); LAST_MENU = root end}
+Settings = {
+  RegisterCanvasLayoutCategory=function(f, name) return {GetID=function() return 77 end, name=name, frame=f} end,
+  RegisterAddOnCategory=function(c) SETTINGS_CAT = c end,
+  OpenToCategory=function(id) SETTINGS_OPENED = id end,
+}
 return {frames=frames, tipSF=tipSF, tipChild=tipChild, sf=sf, getClicked=function() return clicked end}
