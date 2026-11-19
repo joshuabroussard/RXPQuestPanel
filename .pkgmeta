@@ -1,0 +1,19 @@
+# Used by the BigWigs packager to upload each release to CurseForge
+# (see the "Upload to CurseForge" step in .github/workflows/release.yml).
+package-as: RXPQuestPanel
+
+enable-nolib-creation: no
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+ignore:
+  - .github
+  - .pkgmeta
+  - scripts
+  - tests
+  - dist
+  - CHANGELOG.md
+  - README.md
+  - CURSEFORGE.md

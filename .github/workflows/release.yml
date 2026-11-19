@@ -4,10 +4,18 @@ name: Release
 # README.txt and push to main. This tests the addon, builds the zip and
 # release.json, and publishes a GitHub release that WowUp picks up as an update.
 # A version that already has a release is skipped, so other pushes are harmless.
+#
+# CurseForge: once the CF_API_TOKEN secret is set and RXPQuestPanel.toc has a
+# "## X-Curse-Project-ID:" line, each new release is also uploaded to CurseForge
+# with the BigWigs packager (settings in .pkgmeta). Running this workflow by hand
+# uploads the current version to CurseForge even if its GitHub release exists.
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+env:
+  CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
 permissions:
   contents: write
@@ -17,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the packager reads the version from the release tag
 
       - name: Install Lua and luacheck
         run: sudo apt-get update -q && sudo apt-get install -y -q lua5.1 lua-check zip
@@ -31,6 +41,7 @@ jobs:
         run: bash scripts/build.sh
 
       - name: Publish release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -41,3 +52,27 @@ jobs:
           fi
           gh release create "v$VERSION" dist/*.zip dist/release.json \
             --title "v$VERSION" --notes-file dist/NOTES.md --target "$GITHUB_SHA"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare CurseForge upload
+        id: cf
+        if: env.CF_API_TOKEN != '' && (steps.publish.outputs.released == 'true' || github.event_name == 'workflow_dispatch')
+        run: |
+          VERSION=$(cat dist/VERSION)
+          ID=$(sed -n 's/^## X-Curse-Project-ID: *//p' RXPQuestPanel.toc | tr -d '\r[:space:]')
+          if [ -z "$ID" ]; then
+            echo "No ## X-Curse-Project-ID in RXPQuestPanel.toc yet; skipping CurseForge."
+            exit 0
+          fi
+          cp .pkgmeta "$RUNNER_TEMP/pkgmeta"
+          git fetch --tags --force -q
+          git checkout -q "v$VERSION"          # upload exactly what was released
+          cp "$RUNNER_TEMP/pkgmeta" .pkgmeta   # older tags predate .pkgmeta
+          cp dist/NOTES.md CHANGELOG.md        # .pkgmeta reads this as the changelog
+          echo "project=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to CurseForge
+        if: steps.cf.outputs.project != ''
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -p ${{ steps.cf.outputs.project }}
